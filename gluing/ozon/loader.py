@@ -39,10 +39,11 @@ def build_designs(skus: list[OzonSku], accounts: list[str], profile: dict) -> tu
 
     В склейки идут SKU с остатком больше 1 (Озон FBO+FBS плюс отрезы из рулона)."""
     brands = profile["brands"]
+    min_total = profile.get("stock", {}).get("min_total", 2)
     designs: dict[tuple, Design] = {}
     unknown: list[str] = []
     for s, acc in zip(skus, accounts):
-        if s.stock + s.stock_roll <= 1:
+        if s.stock + s.stock_roll < min_total:
             continue
         brand = brands.get(s.prefix)
         if brand is None:
@@ -62,20 +63,27 @@ def build_designs(skus: list[OzonSku], accounts: list[str], profile: dict) -> tu
     return out, unknown
 
 
+def skus_from_rows(rows, rolls: dict[str, int] | None = None):
+    """Строки с полями account, offer_id, title, category, stock, orders28 -> (SKU, кабинеты). Общий путь для CSV и БД."""
+    rolls = rolls or {}
+    skus: list[OzonSku] = []
+    accounts: list[str] = []
+    for r in rows:
+        p = parse_article(r["offer_id"])
+        if not p["design"]:
+            continue                                      # артикул не по шаблону «префикс+цифры/ключ»
+        s = OzonSku(offer_id=r["offer_id"], title=r["title"] or "", category=r["category"] or "",
+                    stock=int(float(r["stock"] or 0)), orders28=int(float(r["orders28"] or 0)),
+                    prefix=p["prefix"], design_no=p["design"], key=p["key"], key_nums=p["key_nums"])
+        apply_roll(s, _type_of(s.category), rolls)
+        skus.append(s)
+        accounts.append(r["account"])
+    return skus, accounts
+
+
 def load_designs(path: Path | str, profile: dict, rolls_path: Path | str | None = None):
     """CSV с колонками account, offer_id, title, category, stock, orders28. rolls_path — рулоны для тканей."""
     rolls = load_rolls(rolls_path) if rolls_path else {}
-    skus: list[OzonSku] = []
-    accounts: list[str] = []
     with open(path, encoding="utf-8", newline="") as f:
-        for r in csv.DictReader(f):
-            p = parse_article(r["offer_id"])
-            if not p["design"]:
-                continue                                  # артикул не по шаблону «префикс+цифры/ключ»
-            s = OzonSku(offer_id=r["offer_id"], title=r["title"] or "", category=r["category"] or "",
-                        stock=int(float(r["stock"])), orders28=int(float(r["orders28"] or 0)),
-                        prefix=p["prefix"], design_no=p["design"], key=p["key"], key_nums=p["key_nums"])
-            apply_roll(s, _type_of(s.category), rolls)
-            skus.append(s)
-            accounts.append(r["account"])
+        skus, accounts = skus_from_rows(csv.DictReader(f), rolls)
     return build_designs(skus, accounts, profile)
