@@ -1,0 +1,303 @@
+{
+  "info": {
+    "name": "Ozon: проверка бренда (только чтение)",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "description": "Три запроса на чтение для проверки атрибута «Бренд» (id 85). Ничего не изменяют. Заполните переменные client_id и api_key (в коллекции или в окружении). Результат смотрите на вкладке Visualize."
+  },
+  "variable": [
+    {
+      "key": "base",
+      "value": "https://api-seller.ozon.ru"
+    },
+    {
+      "key": "client_id",
+      "value": ""
+    },
+    {
+      "key": "api_key",
+      "value": ""
+    }
+  ],
+  "item": [
+    {
+      "name": "1. Бренд у карточек (v4/product/info/attributes)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Client-Id",
+            "value": "{{client_id}}"
+          },
+          {
+            "key": "Api-Key",
+            "value": "{{api_key}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": {
+          "raw": "{{base}}/v4/product/info/attributes",
+          "host": [
+            "{{base}}"
+          ],
+          "path": [
+            "v4",
+            "product",
+            "info",
+            "attributes"
+          ]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"filter\": {\n    \"offer_id\": [\n      \"PT125/4-13-26/1\",\n      \"PT125/1-300220\",\n      \"PT6421/1-200220\",\n      \"AM4490/0-0-28/1\",\n      \"AM4490/6-0-0/1\",\n      \"PA6195/0-0-26/0D\"\n    ],\n    \"visibility\": \"ALL\"\n  },\n  \"limit\": 100,\n  \"last_id\": \"\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "description": "Читает атрибуты карточек. В Tests скрипт достаёт атрибут 85 (Бренд). Артикулы: PT125/4-13-26/1 — «Сказка» (971218860); PT125/1-300220 — «СКАЗКА» (971967449); PT6421/1-200220 — «Сказка» с другим id (115857500); AM4490/0-0-28/1 — «Нет бренда»; AM4490/6-0-0/1 — бренд пустой; PA6195/0-0-26/0D — «Нет бренда»."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "const items = pm.response.json().result || [];",
+              "const rows = items.map(it => {",
+              "  const a = (it.attributes || []).find(x => x.id === 85);",
+              "  const v = a && a.values && a.values[0] ? a.values[0] : {};",
+              "  return {offer_id: it.offer_id, type_id: it.type_id, brand: v.value || \"(пусто)\", brand_dictionary_value_id: v.dictionary_value_id || \"\"};",
+              "});",
+              "pm.visualizer.set(`<table border=1 cellpadding=6><tr><th>offer_id</th><th>type_id</th><th>Бренд</th><th>dictionary_value_id</th></tr>",
+              "{{#each rows}}<tr><td>{{offer_id}}</td><td>{{type_id}}</td><td>{{brand}}</td><td>{{brand_dictionary_value_id}}</td></tr>{{/each}}</table>`, {rows});",
+              "console.table(rows);"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "2. Свойства атрибута «Бренд» (v1/description-category/attribute)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Client-Id",
+            "value": "{{client_id}}"
+          },
+          {
+            "key": "Api-Key",
+            "value": "{{api_key}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": {
+          "raw": "{{base}}/v1/description-category/attribute",
+          "host": [
+            "{{base}}"
+          ],
+          "path": [
+            "v1",
+            "description-category",
+            "attribute"
+          ]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"description_category_id\": 17028731,\n  \"type_id\": 92603,\n  \"language\": \"DEFAULT\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "description": "Список атрибутов типа «Комплект постельного белья» (category 17028731, type 92603); скрипт показывает только атрибут 85."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "const attr = (pm.response.json().result || []).find(a => a.id === 85);",
+              "pm.visualizer.set(`<pre>{{json}}</pre>`, {json: JSON.stringify(attr, null, 2)});",
+              "console.log(\"Атрибут 85 (Бренд):\", attr);"
+            ]
+          }
+        }
+      ],
+      "response": [
+        {
+          "name": "Фрагмент: только атрибут 85 (по результатам проверки 07.10, остальные поля не показаны)",
+          "originalRequest": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Client-Id",
+                "value": "{{client_id}}"
+              },
+              {
+                "key": "Api-Key",
+                "value": "{{api_key}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base}}/v1/description-category/attribute",
+              "host": [
+                "{{base}}"
+              ],
+              "path": [
+                "v1",
+                "description-category",
+                "attribute"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"description_category_id\": 17028731,\n  \"type_id\": 92603,\n  \"language\": \"DEFAULT\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Список атрибутов типа «Комплект постельного белья» (category 17028731, type 92603); скрипт показывает только атрибут 85."
+          },
+          "status": "OK",
+          "code": 200,
+          "_postman_previewlanguage": "json",
+          "header": [
+            {
+              "key": "Content-Type",
+              "value": "application/json"
+            }
+          ],
+          "body": "{\n  \"result\": [\n    {\n      \"id\": 85,\n      \"name\": \"Бренд\",\n      \"is_required\": true,\n      \"is_aspect\": false,\n      \"category_dependent\": true,\n      \"dictionary_id\": 28732849,\n      \"max_value_count\": 0,\n      \"type\": \"String\"\n    }\n  ]\n}"
+        }
+      ]
+    },
+    {
+      "name": "3. Значения бренда в справочнике (v1/.../attribute/values/search)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Client-Id",
+            "value": "{{client_id}}"
+          },
+          {
+            "key": "Api-Key",
+            "value": "{{api_key}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": {
+          "raw": "{{base}}/v1/description-category/attribute/values/search",
+          "host": [
+            "{{base}}"
+          ],
+          "path": [
+            "v1",
+            "description-category",
+            "attribute",
+            "values",
+            "search"
+          ]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"attribute_id\": 85,\n  \"description_category_id\": 17028731,\n  \"type_id\": 92603,\n  \"value\": \"Сказка\",\n  \"limit\": 20\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "description": "Поиск значений справочника брендов по подстроке. Справочник общий для всей площадки, поэтому в нём есть и чужие значения."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "const vals = pm.response.json().result || [];",
+              "pm.visualizer.set(`<table border=1 cellpadding=6><tr><th>id (dictionary_value_id)</th><th>Название</th></tr>",
+              "{{#each vals}}<tr><td>{{id}}</td><td>{{value}}</td></tr>{{/each}}</table>`, {vals});",
+              "console.table(vals.map(v => ({id: v.id, value: v.value})));"
+            ]
+          }
+        }
+      ],
+      "response": [
+        {
+          "name": "Результат поиска «Сказка» (07.10)",
+          "originalRequest": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Client-Id",
+                "value": "{{client_id}}"
+              },
+              {
+                "key": "Api-Key",
+                "value": "{{api_key}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base}}/v1/description-category/attribute/values/search",
+              "host": [
+                "{{base}}"
+              ],
+              "path": [
+                "v1",
+                "description-category",
+                "attribute",
+                "values",
+                "search"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"attribute_id\": 85,\n  \"description_category_id\": 17028731,\n  \"type_id\": 92603,\n  \"value\": \"Сказка\",\n  \"limit\": 20\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Поиск значений справочника брендов по подстроке. Справочник общий для всей площадки, поэтому в нём есть и чужие значения."
+          },
+          "status": "OK",
+          "code": 200,
+          "_postman_previewlanguage": "json",
+          "header": [
+            {
+              "key": "Content-Type",
+              "value": "application/json"
+            }
+          ],
+          "body": "{\n  \"result\": [\n    {\n      \"id\": 115857500,\n      \"value\": \"Сказка\"\n    },\n    {\n      \"id\": 970887859,\n      \"value\": \"СКАЗКА\"\n    },\n    {\n      \"id\": 971084303,\n      \"value\": \"Сказка\"\n    },\n    {\n      \"id\": 971218860,\n      \"value\": \"Сказка\"\n    },\n    {\n      \"id\": 971812849,\n      \"value\": \"Сказка\"\n    },\n    {\n      \"id\": 971967449,\n      \"value\": \"СКАЗКА\"\n    },\n    {\n      \"id\": 972090797,\n      \"value\": \"Сказка\"\n    },\n    {\n      \"id\": 971086243,\n      \"value\": \"Сказка в дом\"\n    }\n  ],\n  \"has_next\": false\n}"
+        }
+      ]
+    }
+  ]
+}

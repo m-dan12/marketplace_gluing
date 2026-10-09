@@ -1,0 +1,39 @@
+# Профиль: Wildberries, кабинет Профтекс
+platform = "wb"
+cabinet = "skazka"
+
+[limits]
+max_group = 30        # максимум SKU в склейке
+min_group = 6         # меньше — выносим на лист проверки
+soft_min_group = 10   # желаемый минимум
+
+[rules]
+fabric_category = "Ткани для рукоделия"
+bedding_categories = ["Постельное белье", "Простыни", "Наволочки", "Пододеяльники"]
+decor_pillowcase_category = "Наволочки декоративные"
+carnival_category = "Карнавальные костюмы"
+carnival_types = { "сарафан" = "сарафаны", "юбк" = "юбки", "плащ" = "плащи" }
+# бренды, у которых вся категория склеивается вместе (без деления по ключам)
+whole_category_brands = { "Сказка Сатин" = "категория максимально вместе", "Анна Мария" = "вся категория вместе" }
+# бренды без эко-правила
+no_eco_brands = ["Анна Мария"]
+button_pillowcase_key = "0-0-263"
+hotel_pillowcase_key = "0-0-260"
+hotel_pillowcase_to = "0-0-26"
+ruffle_ends = ["13", "17", "18"]       # последнее число ключа
+ruffle_brands = ["Сказка"]             # рюши отдельно только у этих брендов
+rhomb_first = ["44", "54"]             # ромбы: пододеяльники, только свой ключ
+order = ["carnival", "decor", "whole_category", "button", "kant", "rhomb", "eco_ruffle", "eco", "ruffle", "child", "generic"]
+
+[solver]
+deterministic_limit = 25   # лимит поиска на пару бренд+категория (условные единицы, результат повторяем)
+workers = 8
+gap = 0.01
+
+[solver.weights]      # штрафы цели; больше вес — важнее
+groups = 100          # каждая лишняя группа
+small_min = 5000      # группа меньше min_group
+small_soft = 300      # группа меньше soft_min_group
+span = 120            # разброс ключей внутри группы (в «соседях»)
+pair = 30             # лишнее дробление ключа между группами
+spread = 5            # неравные размеры групп
