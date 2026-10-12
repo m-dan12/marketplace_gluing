@@ -47,8 +47,10 @@ def fetch(client_id: str, api_key: str, offers: list[str]) -> dict[str, dict]:
             data = json.load(r)
         for it in data.get("result", []):
             attrs = {a["id"]: ", ".join(v.get("value", "") for v in a.get("values", [])) for a in it.get("attributes", [])}
-            res[it["offer_id"]] = {"brand": attrs.get(BRAND, ""), "model": attrs.get(MODEL, ""),
-                                   "product_id": it.get("id")}
+            ids = {a["id"]: ",".join(str(v.get("dictionary_value_id", "")) for v in a.get("values", []))
+                   for a in it.get("attributes", [])}
+            res[it["offer_id"]] = {"brand": attrs.get(BRAND, ""), "brand_id": ids.get(BRAND, ""),
+                                   "model": attrs.get(MODEL, ""), "product_id": it.get("id")}
         time.sleep(0.3)
     return res
 
@@ -57,6 +59,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--brand-selsup", required=True, help="точное написание бренда в SelSup")
     ap.add_argument("--out", required=True)
+    ap.add_argument("--limit", type=int, default=0, help="взять не больше N артикулов (выборка)")
     a = ap.parse_args()
     import psycopg
     from plan_ozon import database_url
@@ -68,6 +71,8 @@ def main():
             where s.snapshot_date=(select max(snapshot_date) from selsup_stocks) and s.brand = %s
             order by 1, 2""", (a.brand_selsup,))
         pairs = cur.fetchall()
+        if a.limit:
+            pairs = pairs[:a.limit]
         c.rollback()
     e = env()
     rows = []
@@ -78,15 +83,15 @@ def main():
         for o in offers:
             g = got.get(o)
             rows.append({"account": acc, "offer_id": o, "found": bool(g),
-                         "ozon_brand": g["brand"] if g else "", "model_name": g["model"] if g else "",
+                         "ozon_brand": g["brand"] if g else "", "ozon_brand_id": g["brand_id"] if g else "", "model_name": g["model"] if g else "",
                          "product_id": g["product_id"] if g else ""})
     with open(a.out, "w", encoding="utf-8-sig", newline="") as f:
         w = csv.DictWriter(f, fieldnames=list(rows[0]))
         w.writeheader()
         w.writerows(rows)
     print("артикулов:", len(rows), "найдено на Озоне:", sum(r["found"] for r in rows))
-    for b, n in Counter(r["ozon_brand"] or "<пусто>" for r in rows).most_common():
-        print(f"  {b!r}: {n}")
+    for (b, i), n in Counter((r["ozon_brand"] or "<пусто>", r["ozon_brand_id"]) for r in rows).most_common():
+        print(f"  {b!r} id={i}: {n}")
 
 
 if __name__ == "__main__":
