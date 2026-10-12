@@ -34,8 +34,13 @@ def quality(groups: list[OGroup]) -> dict:
             for f, n in d.features.items():
                 tot += n
                 ok += n if f == branch else 0
+    where = defaultdict(set)
+    for g in glued:
+        for d in g.designs:
+            where[(d.account, d.brand, d.typ, d.design)].add(g.key.rsplit("#", 1)[0] + "#" + str(g.idx))
     return {
         "дизайнов": n_designs,
+        "дизайнов, разделённых между склейками": sum(1 for v in where.values() if len(v) > 1),
         "склеек": len(big), "малых склеек": sum(1 for g in groups if g.kind == "малая"),
         "склеек из одного дизайна (его SKU вместе)": sum(1 for g in groups if g.kind == "один дизайн"),
         "одиночек (не склеить)": len(singles),

@@ -55,8 +55,12 @@ def test_sheet_elastic_is_not_a_feature():
     assert sku_feature("Простыня", s) == "Обычные"
 
 
+WHOLE = {**PROFILE, "features": {"split_design": False}}
+
+
 def test_rare_feature_wins_for_design():
-    ds = designs_from([sku("PT5/4-13-17/1"), sku("PT5/4-13-26/1")])
+    skus = [sku("PT5/4-13-17/1"), sku("PT5/4-13-26/1")]
+    ds, _ = build_designs(skus, ["skazka"] * 2, WHOLE)
     assert ds[0].features == Counter({"Рюши": 1, "Обычные": 1}) and pick_feature(ds[0]) == "Рюши"
 
 
@@ -220,3 +224,39 @@ def test_small_roll_leaves_long_cuts_unavailable():
     s = fab("PT1/1-1100220")
     apply_roll(s, "Ткань", {"PT1": 10})                             # 10 м < отреза 11 м -> 0 отрезов
     assert s.stock_roll == 0
+
+
+# ---------- деление дизайна по признаку ----------
+def mixed_set(n_ruffle, n_plain):
+    out = [sku(f"PT{1000 + i}/4-13-17/1") for i in range(n_ruffle)]
+    out += [sku(f"PT{3000 + i}/4-13-26/1") for i in range(n_plain)]
+    # один дизайн с обоими признаками
+    out += [sku("PT9000/4-13-17/1"), sku("PT9000/4-13-26/1")]
+    return out
+
+
+def test_split_makes_design_units_by_feature():
+    ds = designs_from([sku("PT5/4-13-17/1"), sku("PT5/4-13-26/1")])
+    assert sorted((d.design, d.feature) for d in ds) == [("PT5", "Обычные"), ("PT5", "Рюши")]
+    assert len({d.uid for d in ds}) == 2
+
+
+def test_split_design_goes_to_two_groups_without_mixing():
+    groups, _, _ = run(mixed_set(12, 12))
+    where = {}
+    for g in groups:
+        for d in g.designs:
+            for s in d.skus:
+                assert (s.key_nums[-1] == "17") == (g.leaf.split(" › ")[0] == "Рюши"), (s.offer_id, g.leaf)
+            where.setdefault(d.design, set()).add(g.key)
+    assert len(where["PT9000"]) == 2
+
+
+def test_small_branch_falls_back_and_design_counts_once():
+    groups, _, _ = run(mixed_set(3, 12))                  # 3 + 1 рюшевых дизайна меньше порога 10: уходят в «Обычные»
+    leaves = {g.leaf.split(" › ")[0] for g in groups}
+    assert leaves == {"Обычные"}
+    designs = [d.design for g in groups for d in g.designs]
+    assert designs.count("PT9000") == 1                   # две части дизайна слились в одну единицу
+    pt = next(d for g in groups for d in g.designs if d.design == "PT9000")
+    assert len(pt.skus) == 2

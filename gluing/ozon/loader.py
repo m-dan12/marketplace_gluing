@@ -40,6 +40,7 @@ def build_designs(skus: list[OzonSku], accounts: list[str], profile: dict) -> tu
     В склейки идут SKU с остатком больше 1 (Озон FBO+FBS плюс отрезы из рулона)."""
     brands = profile["brands"]
     min_total = profile.get("stock", {}).get("min_total", 2)
+    split = profile.get("features", {}).get("split_design", False)
     designs: dict[tuple, Design] = {}
     unknown: list[str] = []
     for s, acc in zip(skus, accounts):
@@ -50,16 +51,18 @@ def build_designs(skus: list[OzonSku], accounts: list[str], profile: dict) -> tu
             unknown.append(s.offer_id)                    # префикс не из списка: не склеиваем молча
             continue
         typ = _type_of(s.category)
-        key = (acc, brand, typ, s.prefix + s.design_no)
+        f = sku_feature(typ, s)
+        key = (acc, brand, typ, s.prefix + s.design_no, f if split else "")
         d = designs.get(key)
         if d is None:
             d = designs[key] = Design(account=acc, brand=brand, typ=typ, design=s.prefix + s.design_no,
-                                      digits=s.design_no)
+                                      digits=s.design_no, split=split, feature=f if split else "")
         d.skus.append(s)
-        d.features[sku_feature(typ, s)] += 1
+        d.features[f] += 1
     out = list(designs.values())
     for d in out:
-        d.feature = pick_feature(d)
+        if not d.split:
+            d.feature = pick_feature(d)
     return out, unknown
 
 

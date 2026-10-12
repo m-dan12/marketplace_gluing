@@ -8,7 +8,7 @@
 from __future__ import annotations
 
 import math
-from collections import defaultdict
+from collections import Counter, defaultdict
 
 from ..lists import child_designs, eco_designs
 from ..parsing import design_candidates
@@ -56,6 +56,28 @@ def _assign_parts(ds: list[Design], k: int, prefix: str, prev_asg: dict, mx: int
     return {i: buckets[i] for i in idxs}
 
 
+def _merge_same_design(ds: list[Design]) -> tuple[list[Design], dict[int, list[str]]]:
+    """Части одного дизайна, попавшие в одну ветку, считаются одним дизайном.
+
+    Возвращает (дизайны, {id(дизайна): uid исходных частей}) — по uid ведётся состояние «липкого» назначения."""
+    by: dict[str, list[Design]] = {}
+    for d in ds:
+        by.setdefault(d.design, []).append(d)
+    out: list[Design] = []
+    uids: dict[int, list[str]] = {}
+    for parts in by.values():
+        if len(parts) == 1:
+            m = parts[0]
+        else:
+            f = parts[0]
+            m = Design(account=f.account, brand=f.brand, typ=f.typ, design=f.design, digits=f.digits,
+                       skus=[s for p in parts for s in p.skus], features=sum((p.features for p in parts), Counter()),
+                       feature=f.feature, split=f.split)
+        out.append(m)
+        uids[id(m)] = [p.uid for p in parts]
+    return out, uids
+
+
 def build(designs: list[Design], profile: dict, prev: dict | None = None):
     """Возвращает (группы, журнал решений, состояние для завтрашнего запуска)."""
     lim, hy = profile["limits"], profile["hysteresis"]
@@ -79,6 +101,7 @@ def build(designs: list[Design], profile: dict, prev: dict | None = None):
         log.append({"node": node, "level": level, "name": name, "n": n, "result": result})
 
     def finalize(acc, brand, typ, leaf, ds):
+        ds, origin = _merge_same_design(ds)
         n = len(ds)
         prefix = f"{acc}|{brand}|{typ}|{leaf}"
         if n < mn:
@@ -94,7 +117,8 @@ def build(designs: list[Design], profile: dict, prev: dict | None = None):
             groups.append(OGroup(key=f"{prefix}#{idx}", account=acc, brand=brand, typ=typ, leaf=leaf, idx=idx,
                                  designs=part, kind=kind))
             for d in part:
-                assign[d.uid] = f"{prefix}#{idx}"
+                for uid in origin[id(d)]:
+                    assign[uid] = f"{prefix}#{idx}"
 
     nodes: dict[tuple, list[Design]] = defaultdict(list)
     for d in designs:

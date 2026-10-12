@@ -32,10 +32,12 @@ class Design:
     skus: list[OzonSku] = field(default_factory=list)
     features: Counter = field(default_factory=Counter)   # признаки SKU
     feature: str = ""                             # признак дизайна в дереве
+    split: bool = False                           # дизайн разделён по признаку: единица = (дизайн, признак)
 
     @property
     def uid(self) -> str:
-        return f"{self.account}|{self.brand}|{self.typ}|{self.design}"
+        base = f"{self.account}|{self.brand}|{self.typ}|{self.design}"
+        return f"{base}|{self.feature}" if self.split else base
 
     @property
     def orders(self) -> int:
