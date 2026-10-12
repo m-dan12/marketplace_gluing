@@ -56,6 +56,7 @@ class Decision(BaseModel):
 class Check(BaseModel):
     hard_violations: list[str] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)
+    twins: list[dict] = Field(default_factory=list)       # группы, где Озон не склеит: {group_id, offers, proposals}
 
 
 class RunInfo(BaseModel):

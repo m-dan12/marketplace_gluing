@@ -277,3 +277,38 @@ def test_single_design_feature_branch_goes_to_fallback():
     skus = [sku(f"PT{1000 + i}/4-13-26/1") for i in range(12)] + [sku("PT2000/4-13-17/1")]
     groups, _, _ = build(designs_from(skus), ACTUAL)
     assert {g.leaf for g in groups} == {"Обычные"}
+
+
+# ---------- близнецы (одинаковая подпись варианта) ----------
+def with_sigs(ds, twin_pairs):
+    for a, b in twin_pairs:
+        for d in ds:
+            if d.design in (a, b):
+                d.sigs = frozenset({("twin", a, b)})
+    return ds
+
+
+def where(groups, design):
+    return [g.key for g in groups for d in g.designs if d.design == design]
+
+
+def test_twins_split_into_two_groups_when_one_group_would_do():
+    ds = with_sigs(designs_from(n_designs(14)), [("PT1000", "PT1001")])
+    groups, _, _ = build(ds, PROFILE)
+    assert len(groups) == 2 and where(groups, "PT1000") != where(groups, "PT1001")
+    assert all(len(g.designs) >= 6 for g in groups)
+
+
+def test_twins_are_moved_between_existing_parts():
+    ds = with_sigs(designs_from(n_designs(25)), [("PT1000", "PT1001")])
+    groups, log, _ = build(ds, PROFILE)
+    assert where(groups, "PT1000") != where(groups, "PT1001")
+    assert all(6 <= len(g.designs) <= 18 for g in groups)
+    assert not [r for r in log if r["level"] == "близнецы"]
+
+
+def test_twins_in_small_group_are_reported_not_hidden():
+    ds = with_sigs(designs_from(n_designs(4)), [("PT1000", "PT1001")])
+    groups, log, _ = build(ds, PROFILE)
+    assert where(groups, "PT1000") == where(groups, "PT1001")
+    assert [r for r in log if r["level"] == "близнецы"]

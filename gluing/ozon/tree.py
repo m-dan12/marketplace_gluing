@@ -56,6 +56,57 @@ def _assign_parts(ds: list[Design], k: int, prefix: str, prev_asg: dict, mx: int
     return {i: buckets[i] for i in idxs}
 
 
+def _clash(a: Design, b: Design) -> bool:
+    return bool(a.sigs & b.sigs)
+
+
+def _clashes(part: list[Design]) -> list[tuple[Design, Design]]:
+    return [(a, b) for i, a in enumerate(part) for b in part[i + 1:] if _clash(a, b)]
+
+
+def _separate_twins(parts: dict[int, list[Design]], mx: int, mn: int) -> list[tuple[Design, Design]]:
+    """Разносит по группам дизайны с одинаковой подписью варианта (Озон не склеит близнецов в одну модель).
+
+    Сначала переносит в группу без конфликта, где есть место; если мест нет — меняет местами с подходящим дизайном.
+    Возвращает пары, которые развести не удалось."""
+    stuck: list[tuple[Design, Design]] = []
+    skip: set[tuple[str, str]] = set()
+    for _ in range(4 * sum(len(p) for p in parts.values()) + 1):
+        todo = None
+        for i, part in parts.items():
+            for a, b in _clashes(part):
+                if (a.uid, b.uid) not in skip:
+                    todo = (i, a, b)
+                    break
+            if todo:
+                break
+        if todo is None:
+            break
+        i, a, b = todo
+        mover = min((a, b), key=lambda d: (d.orders, d.design))
+        rest_i = [d for d in parts[i] if d is not mover]
+        done = False
+        for j in sorted(parts, key=lambda k: (len(parts[k]), k)):
+            if j == i or any(_clash(mover, d) for d in parts[j]):
+                continue
+            if len(parts[j]) < mx and len(parts[i]) > mn:
+                parts[i], parts[j] = rest_i, parts[j] + [mover]
+                done = True
+                break
+            for x in sorted(parts[j], key=lambda d: (d.orders, d.design)):       # обмен
+                if not any(_clash(x, d) for d in rest_i) and not any(_clash(mover, d) for d in parts[j] if d is not x):
+                    parts[i] = rest_i + [x]
+                    parts[j] = [d for d in parts[j] if d is not x] + [mover]
+                    done = True
+                    break
+            if done:
+                break
+        if not done:
+            skip.add((a.uid, b.uid))
+            stuck.append((a, b))
+    return stuck
+
+
 def _merge_same_design(ds: list[Design]) -> tuple[list[Design], dict[int, list[str]]]:
     """Части одного дизайна, попавшие в одну ветку, считаются одним дизайном.
 
@@ -72,7 +123,8 @@ def _merge_same_design(ds: list[Design]) -> tuple[list[Design], dict[int, list[s
             f = parts[0]
             m = Design(account=f.account, brand=f.brand, typ=f.typ, design=f.design, digits=f.digits,
                        skus=[s for p in parts for s in p.skus], features=sum((p.features for p in parts), Counter()),
-                       feature=f.feature, split=f.split)
+                       feature=f.feature, split=f.split,
+                       sigs=frozenset().union(*(p.sigs for p in parts)))
         out.append(m)
         uids[id(m)] = [p.uid for p in parts]
     return out, uids
@@ -117,7 +169,12 @@ def build(designs: list[Design], profile: dict, prev: dict | None = None):
             parts = {1: ds}
         else:
             kind = "склейка"
-            parts = _assign_parts(ds, math.ceil(n / mx), prefix, prev_asg, mx, mn)
+            k = math.ceil(n / mx)
+            if k == 1 and n >= 2 * mn and _clashes(ds):    # близнецов можно развести только по двум группам
+                k = 2
+            parts = _assign_parts(ds, k, prefix, prev_asg, mx, mn)
+        for a, b in _separate_twins(parts, mx, mn) if len(ds) > 1 else []:
+            note(f"{acc}|{brand}|{typ}", "близнецы", f"{a.design} ~ {b.design}", len(ds), "в одной группе, развести нельзя")
         for idx, part in parts.items():
             groups.append(OGroup(key=f"{prefix}#{idx}", account=acc, brand=brand, typ=typ, leaf=leaf, idx=idx,
                                  designs=part, kind=kind))

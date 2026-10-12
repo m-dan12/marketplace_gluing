@@ -32,6 +32,7 @@ class Design:
     skus: list[OzonSku] = field(default_factory=list)
     features: Counter = field(default_factory=Counter)   # признаки SKU
     feature: str = ""                             # признак дизайна в дереве
+    sigs: frozenset = field(default_factory=frozenset, compare=False)   # подписи вариантов SKU (для поиска близнецов)
     split: bool = False                           # дизайн разделён по признаку: единица = (дизайн, признак)
 
     @property

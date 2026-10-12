@@ -23,6 +23,7 @@ from gluing.ozon.tree import build
 from planner.plan import build_plan
 from planner.reader import load_from_db
 from planner.store import PgStore
+from planner.twins import load_aspects, load_attrs, aspect_names
 
 ROOT = Path(__file__).resolve().parent
 
@@ -64,6 +65,7 @@ def main():
         prev = store.last("ozon")                                  # теневой режим: вчерашний план любого статуса
         prev_state = prev.state if prev else None
         prev_ids = {g.key: g.group_id for g in prev.groups} if prev else {}
+        aspects, attrs, anames = load_aspects(conn), load_attrs(conn), aspect_names(conn)
         groups, log, state = build(designs, profile, prev_state)
         run_id = f"{a.as_of}-ozon"
         n = 1
@@ -71,13 +73,17 @@ def main():
             n += 1
             run_id = f"{a.as_of}-ozon-{n}"
         plan = build_plan(groups, log, state, profile, run_id=run_id, engine_version=engine_version(),
-                          inputs=inputs, platform_ids=pids, prev_ids=prev_ids)
+                          inputs=inputs, platform_ids=pids, prev_ids=prev_ids,
+                          attrs=attrs, aspects=aspects, aspect_names=anames)
         q = quality(groups)
         for k, v in q.items():
             print(f"{k}: {v}")
         if prev_state:
             for k, v in churn(prev_state, state).items():
                 print(f"churn.{k}: {v}")
+        print(f"близнецов (групп, где Озон не склеит): {len(plan.checks.twins)}")
+        for tw in plan.checks.twins[:10]:
+            print("  ", tw["group_key"], tw["designs"], tw["color"], tw["proposals"][:1])
         print(f"неизвестных брендов: {len(unknown)}; нарушений жёстких правил: {len(plan.checks.hard_violations)}")
         if a.json:
             Path(a.json).write_text(plan.dumps(), encoding="utf-8")

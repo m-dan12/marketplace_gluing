@@ -50,11 +50,31 @@ def read_snapshots(conn) -> dict[str, str]:
     return {"ozon_stock_snapshot": str(st), "rolls_snapshot": str(sel)}
 
 
+def attach_signatures(conn, designs) -> int:
+    """Проставляет дизайнам подписи вариантов артикулов (из gluing.sku_attr). Возвращает число артикулов без атрибутов."""
+    from planner.twins import load_aspects, load_attrs, signature
+    aspects, attrs = load_aspects(conn), load_attrs(conn)
+    missing = 0
+    for d in designs:
+        sigs = set()
+        for s in d.skus:
+            info = attrs.get((d.account, s.offer_id))
+            if info is None:
+                missing += 1
+                continue
+            sig = signature(info, aspects)
+            if sig:
+                sigs.add(sig)
+        d.sigs = frozenset(sigs)
+    return missing
+
+
 def load_from_db(conn, profile: dict, as_of: str, window_days: int = 28):
     """-> (дизайны, неизвестные бренды, platform_ids {(account, offer_id): {"product_id": ...}}, inputs)."""
     rows = read_rows(conn, as_of, window_days)
     skus, accounts = skus_from_rows(rows, read_rolls(conn))
     pids = {(r["account"], r["offer_id"]): {"product_id": r["product_id"]} for r in rows}
     designs, unknown = build_designs(skus, accounts, profile)
-    inputs = {**read_snapshots(conn), "orders_window_days": window_days, "as_of": as_of}
+    missing = attach_signatures(conn, designs)
+    inputs = {**read_snapshots(conn), "orders_window_days": window_days, "as_of": as_of, "skus_without_attrs": missing}
     return designs, unknown, pids, inputs

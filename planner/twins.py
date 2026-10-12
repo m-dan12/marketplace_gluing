@@ -43,3 +43,9 @@ def find_twins(groups: dict[str, list[tuple[str, str]]], attrs: dict, aspects: d
             if len(offers) > 1:
                 out.append({"group_id": gid, "signature": sig, "offers": sorted(offers)})
     return out
+
+
+def aspect_names(conn) -> dict[int, str]:
+    with conn.cursor() as cur:
+        cur.execute("select attr_id, max(name) from gluing.category_attr group by 1")
+        return dict(cur.fetchall())

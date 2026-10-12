@@ -32,11 +32,45 @@ def check_groups(groups: list[Group], profile: dict) -> Check:
     return Check(hard_violations=hard, warnings=warn)
 
 
+def twins_check(groups: list[OGroup], attrs: dict, aspects: dict, names: dict[int, str] | None = None) -> list[dict]:
+    """Близнецы в итоговых группах + предложение правки «Названия цвета» (человек подтверждает, на площадку не пишем)."""
+    from planner.twins import find_twins
+    names = names or {}
+    keys = {g.key: [(g.account, s.offer_id) for d in g.designs for s in d.skus] for g in groups if g.kind != "одиночка"}
+    design_of = {(g.account, s.offer_id): d.design for g in groups for d in g.designs for s in d.skus}
+    out = []
+    for t in find_twins(keys, attrs, aspects):
+        acc = next(g.account for g in groups if g.key == t["group_id"])
+        color = next((v[0] for a, v in t["signature"] if names.get(a) == "Название цвета" and v), "")
+        by_design: dict[str, list[str]] = {}
+        for o in t["offers"]:
+            by_design.setdefault(design_of[(acc, o)], []).append(o)
+        designs = sorted(by_design)
+        props = [{"design": d, "offers": by_design[d], "attr": "Название цвета", "new_value": f"{color} {d}".strip()}
+                 for d in designs[1:]]
+        out.append({"group_key": t["group_id"], "color": color, "offers": t["offers"], "designs": designs,
+                    "same_design": len(designs) == 1, "proposals": props})
+    return out
+
+
+def _with_twins(check: Check, groups, attrs, aspects, names, ids) -> Check:
+    if attrs is None or aspects is None:
+        return check
+    tw = twins_check(groups, attrs, aspects, names)
+    for t in tw:
+        t["group_id"] = ids.get(t["group_key"], t["group_key"])
+    check.twins = tw
+    if tw:
+        check.warnings.append(f"близнецы: {len(tw)} групп(ы) с одинаковыми вариантами, Озон их не склеит")
+    return check
+
+
 def build_plan(groups: list[OGroup], log: list[dict], state: dict, profile: dict, *, run_id: str,
                profile_name: str = "ozon", engine_version: str = "dev", inputs: dict | None = None,
                platform_ids: dict[tuple[str, str], dict] | None = None,
                prev_ids: dict[str, str] | None = None, live_models: dict[str, str] | None = None,
-               mode: str = "shadow", created_at: str | None = None) -> Plan:
+               mode: str = "shadow", created_at: str | None = None,
+               attrs: dict | None = None, aspects: dict | None = None, aspect_names: dict | None = None) -> Plan:
     platform_ids = platform_ids or {}
     ids = assign_ids([(g.key, [s.offer_id for d in g.designs for s in d.skus]) for g in groups], prev_ids, live_models)
     out: list[Group] = []
@@ -60,5 +94,5 @@ def build_plan(groups: list[OGroup], log: list[dict], state: dict, profile: dict
         run=RunInfo(run_id=run_id, platform="ozon", engine_version=engine_version, profile_name=profile_name,
                     profile_hash=profile_hash(profile), inputs=inputs or {}, mode=mode,
                     created_at=created_at or datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")),
-        groups=out, unglued=unglued, checks=check_groups(out, profile),
+        groups=out, unglued=unglued, checks=_with_twins(check_groups(out, profile), groups, attrs, aspects, aspect_names, ids),
         decisions=[Decision(**x) for x in log], state=state)
