@@ -90,9 +90,14 @@ def build(designs: list[Design], profile: dict, prev: dict | None = None):
     groups: list[OGroup] = []
     assign: dict[str, str] = {}
 
-    def want(key: str, n: int) -> bool:
+    fh = profile.get("features", {})
+    feat_up, feat_down = fh.get("split_up", hy["split_up"]), fh.get("merge_down", hy["merge_down"])
+    feat_free = "split_up" in fh                          # признаки не требуют жизнеспособного остатка обычной ветки
+
+    def want(key: str, n: int, feat: bool = False) -> bool:
         """Отделять ли ветку: при ≥ split_up, а если вчера была отделена — пока ≥ merge_down."""
-        thr = hy["merge_down"] if prev_dec.get(key) else hy["split_up"]
+        up, down = (feat_up, feat_down) if feat else (hy["split_up"], hy["merge_down"])
+        thr = down if prev_dec.get(key) else up
         ok = n >= thr
         decisions[key] = ok
         return ok
@@ -139,19 +144,15 @@ def build(designs: list[Design], profile: dict, prev: dict | None = None):
                     f, n = fb[f], n + 1
                 return n
 
-            forced = set(profile.get("features", {}).get("always_separate", {}).get(typ, []))
             for f in sorted((f for f in members if f != default), key=lambda f: -depth(f)):
-                if f in forced:                               # самостоятельный товар: отделяем при любом числе дизайнов
-                    note(node, "признак", f, len(members[f]), "отделён всегда (правило профиля)")
-                    continue
-                if not want(f"{node}|признак:{f}", len(members[f])):
+                if not want(f"{node}|признак:{f}", len(members[f]), feat=True):
                     tgt = fb.get(f, default)
                     note(node, "признак", f, len(members[f]), f"мало → в «{tgt}»")
                     members[tgt].extend(members.pop(f))
             sep = {f: v for f, v in members.items() if f != default}
             rest = members.get(default, [])
-            while 0 < len(rest) < mn and any(f not in forced for f in sep):   # остаток обычной ветки должен быть жизнеспособным
-                f = min((x for x in sep if x not in forced), key=lambda x: len(sep[x]))
+            while sep and 0 < len(rest) < mn and not feat_free:   # остаток обычной ветки должен быть жизнеспособным
+                f = min(sep, key=lambda x: len(sep[x]))
                 note(node, "признак", f, len(sep[f]), "возвращён: остаток обычных меньше минимума")
                 rest = rest + sep.pop(f)
             for f, v in sep.items():

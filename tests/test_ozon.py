@@ -10,7 +10,9 @@ from gluing.ozon.tree import build
 from gluing.parsing import parse_article
 
 ROOT = Path(__file__).resolve().parent.parent
-PROFILE = tomllib.load(open(ROOT / "profiles" / "ozon.toml", "rb"))
+ACTUAL = tomllib.load(open(ROOT / "profiles" / "ozon.toml", "rb"))
+# механика порогов и запасных веток проверяется при старых порогах 10/8 для всех веток; правило «признак отделяется всегда» отдельно (ACTUAL)
+PROFILE = {**ACTUAL, "features": {k: v for k, v in ACTUAL["features"].items() if k not in ("split_up", "merge_down")}}
 
 SET = "Постельное белье > Комплект постельного белья"
 PIL = "Постельное белье > Наволочка"
@@ -262,11 +264,16 @@ def test_small_branch_falls_back_and_design_counts_once():
     assert len(pt.skus) == 2
 
 
-def test_always_separate_feature_forms_own_group_even_when_small():
+def test_feature_always_defines_branch_even_when_small():
     curt = "Шторы > Штора"
     skus = [sku(f"PT{1000 + i}/1-140175", curt, title="Штора") for i in range(12)]
     skus += [sku(f"PT{2000 + i}/1-140175L", curt, title="Штора на липучках") for i in range(3)]
-    groups, log, _ = build(designs_from(skus), PROFILE)
+    groups, log, _ = build(designs_from(skus), ACTUAL)
     leaves = {g.leaf: sum(len(g2.designs) for g2 in groups if g2.leaf == g.leaf) for g in groups}
     assert leaves == {"Обычные": 12, "На липучках": 3}
-    assert any(r["result"].startswith("отделён всегда") for r in log)
+
+
+def test_single_design_feature_branch_goes_to_fallback():
+    skus = [sku(f"PT{1000 + i}/4-13-26/1") for i in range(12)] + [sku("PT2000/4-13-17/1")]
+    groups, _, _ = build(designs_from(skus), ACTUAL)
+    assert {g.leaf for g in groups} == {"Обычные"}
