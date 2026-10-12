@@ -126,3 +126,25 @@ def test_memory_store_last_by_status(built):
     assert st.last("ozon").run.run_id == "r2"
     assert st.last("ozon", KEEP).run.run_id == "r1"
     assert st.last("wb") is None
+
+
+def test_twin_proposals_use_ordinal_and_skip_taken_names():
+    from gluing.ozon.model import Design, OGroup, OzonSku
+    from planner.plan import twins_check
+
+    def d(code, offer):
+        s = OzonSku(offer_id=offer, title="", category="", stock=5, orders28=0, prefix="PT", design_no=code[2:], key="1", key_nums=())
+        return Design(account="skazka", brand="Сказка", typ="Комплект", design=code, digits=code[2:], skus=[s])
+
+    g = OGroup(key="k", account="skazka", brand="Сказка", typ="Комплект", leaf="Обычные", idx=1,
+               designs=[d("PT343", "a"), d("PT344", "b"), d("PT345", "c"), d("PT400", "x")], kind="склейка")
+    cat = (1, 2)
+    info = lambda color: {"cat": cat, "name": "", "attrs": {"10097": [color], "6771": ["160x200"]}}
+    attrs = {("skazka", "a"): info("Бисер"), ("skazka", "b"): info("Бисер"), ("skazka", "c"): info("Бисер"),
+             ("skazka", "x"): info("Бисер 2")}                 # «Бисер 2» уже занято в группе
+    aspects = {cat: {10097: "Название цвета", 6771: "Размер простыни"}}
+    names = {10097: "Название цвета", 6771: "Размер простыни"}
+    # x отличается подписью? нет: все цвета разные кроме a/b/c — x тоже «Бисер 2» и не близнец
+    tw = twins_check([g], attrs, aspects, names)
+    assert len(tw) == 1 and tw[0]["designs"] == ["PT343", "PT344", "PT345"]
+    assert [p["new_value"] for p in tw[0]["proposals"]] == ["Бисер 3", "Бисер 4"]

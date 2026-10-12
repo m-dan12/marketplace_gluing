@@ -46,8 +46,16 @@ def twins_check(groups: list[OGroup], attrs: dict, aspects: dict, names: dict[in
         for o in t["offers"]:
             by_design.setdefault(design_of[(acc, o)], []).append(o)
         designs = sorted(by_design)
-        props = [{"design": d, "offers": by_design[d], "attr": "Название цвета", "new_value": f"{color} {d}".strip()}
-                 for d in designs[1:]]
+        color_ids = [a for a, n in names.items() if n == "Название цвета"]
+        used = {v for (a, o) in keys[t["group_id"]] for cid in color_ids
+                for v in (attrs.get((a, o), {}).get("attrs", {}).get(str(cid)) or [])}
+        props, n = [], 1
+        for d in designs[1:]:                         # первый дизайн сохраняет имя, остальным порядковый номер
+            n += 1
+            while f"{color} {n}" in used:
+                n += 1
+            used.add(f"{color} {n}")
+            props.append({"design": d, "offers": by_design[d], "attr": "Название цвета", "new_value": f"{color} {n}".strip()})
         out.append({"group_key": t["group_id"], "color": color, "offers": t["offers"], "designs": designs,
                     "same_design": len(designs) == 1, "proposals": props})
     return out
