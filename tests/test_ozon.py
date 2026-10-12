@@ -260,3 +260,13 @@ def test_small_branch_falls_back_and_design_counts_once():
     assert designs.count("PT9000") == 1                   # две части дизайна слились в одну единицу
     pt = next(d for g in groups for d in g.designs if d.design == "PT9000")
     assert len(pt.skus) == 2
+
+
+def test_always_separate_feature_forms_own_group_even_when_small():
+    curt = "Шторы > Штора"
+    skus = [sku(f"PT{1000 + i}/1-140175", curt, title="Штора") for i in range(12)]
+    skus += [sku(f"PT{2000 + i}/1-140175L", curt, title="Штора на липучках") for i in range(3)]
+    groups, log, _ = build(designs_from(skus), PROFILE)
+    leaves = {g.leaf: sum(len(g2.designs) for g2 in groups if g2.leaf == g.leaf) for g in groups}
+    assert leaves == {"Обычные": 12, "На липучках": 3}
+    assert any(r["result"].startswith("отделён всегда") for r in log)

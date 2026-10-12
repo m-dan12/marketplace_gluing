@@ -139,15 +139,19 @@ def build(designs: list[Design], profile: dict, prev: dict | None = None):
                     f, n = fb[f], n + 1
                 return n
 
+            forced = set(profile.get("features", {}).get("always_separate", {}).get(typ, []))
             for f in sorted((f for f in members if f != default), key=lambda f: -depth(f)):
+                if f in forced:                               # самостоятельный товар: отделяем при любом числе дизайнов
+                    note(node, "признак", f, len(members[f]), "отделён всегда (правило профиля)")
+                    continue
                 if not want(f"{node}|признак:{f}", len(members[f])):
                     tgt = fb.get(f, default)
                     note(node, "признак", f, len(members[f]), f"мало → в «{tgt}»")
                     members[tgt].extend(members.pop(f))
             sep = {f: v for f, v in members.items() if f != default}
             rest = members.get(default, [])
-            while sep and 0 < len(rest) < mn:             # остаток обычной ветки должен быть жизнеспособным
-                f = min(sep, key=lambda x: len(sep[x]))
+            while 0 < len(rest) < mn and any(f not in forced for f in sep):   # остаток обычной ветки должен быть жизнеспособным
+                f = min((x for x in sep if x not in forced), key=lambda x: len(sep[x]))
                 note(node, "признак", f, len(sep[f]), "возвращён: остаток обычных меньше минимума")
                 rest = rest + sep.pop(f)
             for f, v in sep.items():
