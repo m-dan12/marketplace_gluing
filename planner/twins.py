@@ -50,3 +50,29 @@ def aspect_names(conn) -> dict[int, str]:
     with conn.cursor() as cur:
         cur.execute("select attr_id, max(name) from gluing.category_attr group by 1")
         return dict(cur.fetchall())
+
+
+# Атрибуты, различия в которых не годятся для названия цвета (служебные, длинные тексты, идентификаторы).
+SKIP_ATTRS = {9048, 10097, 10096, 4191, 4180, 22336, 23171}        # модель, цвет, аннотация, название, ключевые слова, хештеги
+SKIP_NAMES = ("аннотация", "название", "хештег", "ключев", "описание", "ссылка", "видео", "рич", "изображен", "штрихкод", "артикул")
+MAX_TAIL = 30
+
+
+def distinguishing_value(acc: str, first: list[str], other: list[str], attrs: dict, aspects: dict, names: dict[int, str]) -> tuple[str, str]:
+    """Значение атрибута, которым дизайн `other` отличается от дизайна `first` (не вариативный и не служебный). -> (значение, имя атрибута)."""
+    sample = attrs.get((acc, first[0])) or attrs.get((acc, other[0]))
+    if not sample:
+        return "", ""
+    asp = set(aspects.get(sample["cat"], {}))
+    ids = sorted({int(a) for o in first + other for a in (attrs.get((acc, o)) or {}).get("attrs", {})})
+    for aid in ids:
+        name = names.get(aid, "")
+        if aid in asp or aid in SKIP_ATTRS or any(s in name.lower() for s in SKIP_NAMES):
+            continue
+        va = {tuple((attrs.get((acc, o)) or {}).get("attrs", {}).get(str(aid), [])) for o in first}
+        vb = {tuple((attrs.get((acc, o)) or {}).get("attrs", {}).get(str(aid), [])) for o in other}
+        if len(va) == 1 and len(vb) == 1 and va != vb and () not in vb:
+            text = "/".join(next(iter(vb)))
+            if 0 < len(text) <= MAX_TAIL and any(ch.isalpha() for ch in text):
+                return text, name
+    return "", ""

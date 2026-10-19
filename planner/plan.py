@@ -50,12 +50,17 @@ def twins_check(groups: list[OGroup], attrs: dict, aspects: dict, names: dict[in
         used = {v for (a, o) in keys[t["group_id"]] for cid in color_ids
                 for v in (attrs.get((a, o), {}).get("attrs", {}).get(str(cid)) or [])}
         props, n = [], 1
-        for d in designs[1:]:                         # первый дизайн сохраняет имя, остальным порядковый номер
-            n += 1
-            while f"{color} {n}" in used:
+        from planner.twins import distinguishing_value
+        for d in designs[1:]:
+            tail, source = distinguishing_value(acc, by_design[designs[0]], by_design[d], attrs, aspects, names)
+            new = f"{color}, {tail}".strip(", ") if tail else ""
+            if not new or new in used:                  # нет различающегося атрибута или имя занято: порядковый номер
                 n += 1
-            used.add(f"{color} {n}")
-            props.append({"design": d, "offers": by_design[d], "attr": "Название цвета", "new_value": f"{color} {n}".strip()})
+                while f"{color} {n}" in used:
+                    n += 1
+                new, source = f"{color} {n}".strip(), "порядковый номер"
+            used.add(new)
+            props.append({"design": d, "offers": by_design[d], "attr": "Название цвета", "new_value": new, "source": source})
         out.append({"group_key": t["group_id"], "color": color, "offers": t["offers"], "designs": designs,
                     "same_design": len(designs) == 1, "proposals": props})
     return out

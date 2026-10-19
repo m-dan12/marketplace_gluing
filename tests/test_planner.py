@@ -148,3 +148,32 @@ def test_twin_proposals_use_ordinal_and_skip_taken_names():
     tw = twins_check([g], attrs, aspects, names)
     assert len(tw) == 1 and tw[0]["designs"] == ["PT343", "PT344", "PT345"]
     assert [p["new_value"] for p in tw[0]["proposals"]] == ["Бисер 3", "Бисер 4"]
+
+
+def _cloth_groups(extra_a, extra_b):
+    from gluing.ozon.model import Design, OGroup, OzonSku
+    from planner.plan import twins_check
+
+    def d(code, offer):
+        s = OzonSku(offer_id=offer, title="", category="", stock=5, orders28=0, prefix="PT", design_no=code[2:], key="1", key_nums=())
+        return Design(account="skazka", brand="Сказка", typ="Комплект", design=code, digits=code[2:], skus=[s])
+
+    g = OGroup(key="k", account="skazka", brand="Сказка", typ="Комплект", leaf="Обычные", idx=1,
+               designs=[d("PT343", "a"), d("PT344", "b")], kind="склейка")
+    cat = (1, 2)
+    mk = lambda extra: {"cat": cat, "name": "", "attrs": {"10097": ["Бисер"], "6771": ["160x200"], **extra}}
+    attrs = {("skazka", "a"): mk(extra_a), ("skazka", "b"): mk(extra_b)}
+    aspects = {cat: {10097: "Название цвета", 6771: "Размер простыни"}}
+    names = {10097: "Название цвета", 6771: "Размер простыни", 500: "Тип застёжки", 501: "Аннотация"}
+    return twins_check([g], attrs, aspects, names)
+
+
+def test_twin_proposal_uses_distinguishing_attribute_first():
+    tw = _cloth_groups({"500": ["на молнии"]}, {"500": ["на пуговицах"]})
+    assert tw[0]["proposals"][0]["new_value"] == "Бисер, на пуговицах"
+    assert tw[0]["proposals"][0]["source"] == "Тип застёжки"
+
+
+def test_twin_proposal_ignores_service_attributes_and_falls_back_to_ordinal():
+    tw = _cloth_groups({"501": ["один текст"]}, {"501": ["другой текст"]})      # аннотация в служебных
+    assert tw[0]["proposals"][0]["new_value"] == "Бисер 2" and tw[0]["proposals"][0]["source"] == "порядковый номер"
