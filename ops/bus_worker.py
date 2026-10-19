@@ -5,12 +5,12 @@
                        --gluing.ozon.plan_ready-->   apply (proftex): dry-run по живым атрибутам
                        --gluing.ozon.dryrun_ready--> (уведомление / согласование; запись на Озон здесь не выполняется)
 
-    python ops/bus_worker.py attrs|plan|apply [--once | --loop] [--poll 60]
+    python ops/bus_worker.py attrs|plan|apply [--loop] [--poll 60]   # без --loop: разобрать очередь и выйти
     python ops/bus_worker.py publish <топик> [--key К] [--payload '{"dry": true}']
     python ops/bus_worker.py init       # один раз: зарегистрировать подписчиков (до этого события им не доставляются)
     python ops/bus_worker.py status
 
-На laya запускать через туннель:  python ops/laya_run.py -- python ops/bus_worker.py plan --once
+На laya запускать через туннель:  python ops/laya_run.py -- python ops/bus_worker.py plan
 payload.dry = true — сквозной тест без записи: атрибуты не обновляются, план не сохраняется, dry-run не публикуется.
 Настройки (окружение или .env в корне проекта): BUS_DATABASE_URL; для attrs ещё MARKETPLACE_ENV — путь к .env с ключами Озона."""
 from __future__ import annotations
