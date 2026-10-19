@@ -21,7 +21,7 @@ import logging
 import os
 import re
 import sys
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -155,15 +155,27 @@ def main() -> int:
                 print("зарегистрирован", name, pattern)
             return 0
         if a.role == "status":
-            for name, _, _ in ROLES.values():
-                print(name, bus.status(name))
+            for role, (name, _, _) in ROLES.items():
+                beat_file = ROOT / "logs" / f"heartbeat_{role}.txt"
+                age = ""
+                if beat_file.exists():
+                    age = f", пульс {int((datetime.now() - datetime.fromisoformat(beat_file.read_text().strip())).total_seconds())} с назад"
+                print(name, bus.status(name), age)
             return 0
         name, pattern, make = ROLES[a.role]
         router = Router()
         router.on(pattern)(make(bus))
         w = Worker(bus, name, router, max_attempts=3, visibility_sec=3600)
         if a.loop:
-            w.run_forever(a.poll)
+            beat_file = ROOT / "logs" / f"heartbeat_{a.role}.txt"
+            beat_file.parent.mkdir(exist_ok=True)
+
+            def beat() -> bool:                               # пульс: файл с временем последней итерации цикла
+                beat_file.write_text(datetime.now().isoformat(timespec="seconds"), encoding="ascii")
+                return False
+
+            log.info("%s: слушаю шину (LISTEN), страховочный опрос раз в %s с", name, a.poll)
+            w.run_forever(a.poll, stop=beat)
         else:
             print(f"{name}: обработано {w.run_once()}")
         return 0

@@ -2,7 +2,8 @@
 
     python ops/laya_run.py -- python plan_ozon.py --dry
 
-Туннель поднимается на время команды и закрывается всегда (и при ошибке). Настройки читаются из .env в корне проекта:
+Туннель поднимается на время команды и закрывается всегда (и при ошибке). Если туннель оборвался во время работы, команда
+останавливается и возвращается код 75 (для постоянных подписчиков: их перезапускает сторож Планировщика). Настройки читаются из .env в корне проекта:
     TUNNEL_TARGET       пользователь@адрес proftex-server, например Proftex1@100.104.20.51
     TUNNEL_KEY          путь к закрытому ключу туннеля (на сервере разрешён только проброс на 127.0.0.1:5432)
     TUNNEL_LOCAL_PORT   локальный порт (по умолчанию 15432)
@@ -64,6 +65,17 @@ def open_tunnel(env: dict[str, str]):
     raise SystemExit("туннель не поднялся за 30 секунд")
 
 
+TUNNEL_LOST = 75                                                  # код возврата, если туннель оборвался (сторож в Планировщике перезапустит)
+
+
+def stop(proc: subprocess.Popen) -> None:
+    proc.terminate()
+    try:
+        proc.wait(timeout=10)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--env", default=str(ROOT / ".env"))
@@ -74,14 +86,21 @@ def main() -> int:
         raise SystemExit("укажите команду после --")
     env = read_env(Path(a.env))
     proc = open_tunnel(env)
+    child = None
     try:
-        return subprocess.run(cmd, cwd=ROOT, env={**os.environ, **env}).returncode
+        child = subprocess.Popen(cmd, cwd=ROOT, env={**os.environ, **env})
+        while True:
+            try:
+                return child.wait(timeout=2)
+            except subprocess.TimeoutExpired:
+                if proc.poll() is not None:                       # туннель оборвался: команда без БД бесполезна, выходим с ошибкой
+                    print("туннель оборвался, останавливаю команду", file=sys.stderr)
+                    stop(child)
+                    return TUNNEL_LOST
     finally:
-        proc.terminate()
-        try:
-            proc.wait(timeout=5)
-        except subprocess.TimeoutExpired:
-            proc.kill()
+        if child is not None and child.poll() is None:
+            stop(child)
+        stop(proc)
 
 
 if __name__ == "__main__":
