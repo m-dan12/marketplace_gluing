@@ -139,3 +139,27 @@ def dry_run(plan: Plan, live: dict[tuple[str, str], dict], aspects: dict,
                 continue                                  # уже сам по себе, либо вне плана по другой причине (остаток есть)
             out.ops.append(Op(acc, offer, "unglue_model", MODEL_NAME_ATTR, cur, offer, "", info.get("product_id")))
     return out
+
+
+OP_TYPES = ("set_color_name", "set_model_name", "unglue_model")
+
+
+def select_ops(ops: list[Op], group_type: dict[str, str], accounts: set[str] = frozenset(),
+               types: set[str] = frozenset(), only: set[str] = frozenset()) -> list[Op]:
+    """Отбор операций для частичного применения: по кабинетам, типам товара (у unglue_model типа нет, он зависит от кабинета и вида)
+    и видам операций. Пустой фильтр не ограничивает."""
+    bad = set(only) - set(OP_TYPES)
+    if bad:
+        raise ValueError(f"неизвестные виды операций {sorted(bad)}; допустимо {list(OP_TYPES)}")
+    out = []
+    for o in ops:
+        if accounts and o.account not in accounts:
+            continue
+        if only and o.op_type not in only:
+            continue
+        if types and o.op_type != "unglue_model" and group_type.get(o.group_id) not in types:
+            continue
+        if types and o.op_type == "unglue_model":
+            continue                                     # снятие по типу товара не фильтруется: тип артикулу вне плана неизвестен
+        out.append(o)
+    return out

@@ -4,7 +4,7 @@
     python apply_ozon.py --run 2026-10-13-ozon --json ops.json
     python apply_ozon.py --refresh --env <путь к .env>     # сначала перечитать атрибуты с Озона (только чтение)
     python apply_ozon.py --approve --by <имя>              # согласовать последний план (статус approved), запись в аудит
-    python apply_ozon.py --execute --confirm <run_id> --env <путь к .env> [--accounts skazka] [--types Скатерть] [--max-ops 1500]
+    python apply_ozon.py --execute --confirm <run_id> --env <путь к .env> [--accounts skazka] [--types Скатерть] [--only set_model_name] [--max-ops 1500]
     python apply_ozon.py --rollback <run_id> --execute --confirm <run_id> --env <путь к .env>
 
 Запись возможна только при статусе плана approved, с явным --execute и --confirm <run_id>. Путь к .env с ключами
@@ -19,7 +19,7 @@ from dataclasses import asdict
 import psycopg
 
 from applier.executor import PgJournal, Settings, execute, rollback
-from applier.ops import dry_run
+from applier.ops import dry_run, select_ops
 from applier.ozon_client import api_for, env_path, read_env
 from plan_ozon import database_url
 from planner.store import PgStore
@@ -47,7 +47,8 @@ def main() -> None:
     ap.add_argument("--confirm", default="", help="повторите run_id плана, чтобы подтвердить запись")
     ap.add_argument("--rollback", default="", help="run_id, чьи применённые операции нужно откатить (вместе с --execute)")
     ap.add_argument("--accounts", default="", help="через запятую: skazka,timeless,milky_garden (по умолчанию все)")
-    ap.add_argument("--types", default="", help="только эти типы товара, через запятую")
+    ap.add_argument("--types", default="", help="только эти типы товара, через запятую (снятия unglue_model по типу не фильтруются и отбрасываются)")
+    ap.add_argument("--only", default="", help="только эти виды операций: set_color_name, set_model_name, unglue_model")
     ap.add_argument("--max-ops", type=int, default=1500, help="предохранитель: больше операций за запуск не применять")
     ap.add_argument("--no-probe", dest="probe", action="store_false", help="не делать пробную запись одной операции")
     a = ap.parse_args()
@@ -94,7 +95,8 @@ def main() -> None:
         accounts = {x.strip() for x in a.accounts.split(",") if x.strip()}
         types = {x.strip() for x in a.types.split(",") if x.strip()}
         gtype = {g.group_id: g.type for g in plan.groups}
-        res.ops = [o for o in res.ops if (not accounts or o.account in accounts) and (not types or gtype[o.group_id] in types)]
+        only = {x.strip() for x in a.only.split(",") if x.strip()}
+        res.ops = select_ops(res.ops, gtype, accounts, types, only)
         print(f"план {rid}, статус {status}; режим: {'ЗАПИСЬ' if a.execute else 'dry-run, на Озон ничего не отправляется'}")
         show(res)
         if a.json:

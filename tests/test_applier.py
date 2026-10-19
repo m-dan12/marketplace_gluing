@@ -83,3 +83,17 @@ def test_no_unglue_without_stock_data():
     p = plan([group("g_1", ["a"], 1)])
     live = {("skazka", "a"): live_item("Роза", "g_1"), ("skazka", "z"): live_item("Лилия", "g_1")}
     assert not [o for o in dry_run(p, live, ASP).ops if o.op_type == "unglue_model"]
+
+
+def test_select_ops_filters_by_account_type_and_kind():
+    import pytest
+    from applier.ops import Op, select_ops
+    ops = [Op("skazka", "a", "set_model_name", 9048, "", "g1", "g1"), Op("skazka", "b", "set_model_name", 9048, "", "g2", "g2"),
+           Op("timeless", "c", "set_color_name", 10097, "x", "y", "g1"), Op("skazka", "z", "unglue_model", 9048, "g1", "z", "")]
+    gt = {"g1": "Комплект", "g2": "Скатерть"}
+    assert [o.offer_id for o in select_ops(ops, gt)] == ["a", "b", "c", "z"]
+    assert [o.offer_id for o in select_ops(ops, gt, only={"unglue_model"})] == ["z"]
+    assert [o.offer_id for o in select_ops(ops, gt, accounts={"skazka"}, only={"set_model_name"})] == ["a", "b"]
+    assert [o.offer_id for o in select_ops(ops, gt, types={"Скатерть"})] == ["b"]        # снятия по типу не фильтруются
+    with pytest.raises(ValueError):
+        select_ops(ops, gt, only={"drop_table"})
