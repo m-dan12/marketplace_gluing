@@ -12,7 +12,7 @@
 
 На laya запускать через туннель:  python ops/laya_run.py -- python ops/bus_worker.py plan --once
 payload.dry = true — сквозной тест без записи: атрибуты не обновляются, план не сохраняется, dry-run не публикуется.
-Строка подключения к шине: BUS_DATABASE_URL (окружение или .env в корне проекта)."""
+Настройки (окружение или .env в корне проекта): BUS_DATABASE_URL; для attrs ещё MARKETPLACE_ENV — путь к .env с ключами Озона."""
 from __future__ import annotations
 
 import argparse
@@ -33,13 +33,19 @@ log = logging.getLogger("bus_worker")
 DATE = re.compile(r"\d{4}-\d{2}-\d{2}")
 
 
-def bus_url() -> str:
-    url = os.environ.get("BUS_DATABASE_URL")
+def conf(name: str) -> str:
+    """Значение из окружения или из .env в корне проекта (пусто, если нет)."""
+    val = os.environ.get(name, "")
     env = ROOT / ".env"
-    if not url and env.exists():
+    if not val and env.exists():
         for line in env.read_text(encoding="utf-8").splitlines():
-            if line.startswith("BUS_DATABASE_URL="):
-                url = line.split("=", 1)[1].strip()
+            if line.startswith(name + "="):
+                val = line.split("=", 1)[1].strip()
+    return val
+
+
+def bus_url() -> str:
+    url = conf("BUS_DATABASE_URL")
     if not url:
         raise SystemExit("нет BUS_DATABASE_URL (окружение или .env)")
     return url
@@ -71,7 +77,7 @@ def handler_attrs(bus):
             from plan_ozon import database_url
             from planner.ozon_attrs import run as refresh
             with psycopg.connect(database_url()) as conn:
-                stats = refresh(conn, str(env_path("")), None, False)
+                stats = refresh(conn, str(env_path(conf("MARKETPLACE_ENV"))), None, False)
         bus.publish("gluing.ozon.attrs_ready", key=ev.key,
                     payload={"as_of": as_of_of(ev), "stats": stats, "dry": dry}, producer="gluing-attrs", trace_id=str(ev.id))
         log.info("атрибуты обновлены (dry=%s): %s", dry, stats)
