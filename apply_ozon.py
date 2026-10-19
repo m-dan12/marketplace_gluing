@@ -35,6 +35,16 @@ def show(res) -> None:
         print("  предупреждение:", w[:200])
 
 
+def check_plan(conn, plan):
+    """Сравнение плана с живыми атрибутами и остатками (только чтение БД): список операций, блокировки, предупреждения."""
+    with conn.cursor() as cur:
+        cur.execute("select account, offer_id, sum(present) from ozon_stocks where snapshot_date=(select max(snapshot_date) from ozon_stocks) group by 1,2")
+        stock = {(a_, o_): int(s_ or 0) for a_, o_, s_ in cur.fetchall()}
+    res = dry_run(plan, load_attrs(conn), load_aspects(conn), stock)
+    conn.rollback()
+    return res
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--run", default="", help="run_id плана; по умолчанию последний план Озона")
@@ -87,11 +97,7 @@ def main() -> None:
             print(f"план {rid} согласован ({a.by})")
             return
 
-        with conn.cursor() as cur:
-            cur.execute("select account, offer_id, sum(present) from ozon_stocks where snapshot_date=(select max(snapshot_date) from ozon_stocks) group by 1,2")
-            stock = {(a_, o_): int(s_ or 0) for a_, o_, s_ in cur.fetchall()}
-        res = dry_run(plan, load_attrs(conn), load_aspects(conn), stock)
-        conn.rollback()
+        res = check_plan(conn, plan)
         accounts = {x.strip() for x in a.accounts.split(",") if x.strip()}
         types = {x.strip() for x in a.types.split(",") if x.strip()}
         gtype = {g.group_id: g.type for g in plan.groups}

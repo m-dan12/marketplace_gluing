@@ -48,6 +48,55 @@ def engine_version() -> str:
         return "dev"
 
 
+def run_plan(as_of: str, dry: bool = False, profile_path: str | None = None, json_path: str = "", xlsx_path: str = "") -> dict:
+    """Строит план и (если не dry) сохраняет черновик. Возвращает итог: run_id, метрики, число близнецов, сохранён ли план."""
+    with open(profile_path or ROOT / "profiles" / "ozon.toml", "rb") as f:
+        profile = tomllib.load(f)
+
+    with psycopg.connect(database_url()) as conn:
+        store = PgStore(conn)
+        designs, unknown, pids, inputs = load_from_db(conn, profile, as_of)
+        prev = store.last("ozon")                                  # теневой режим: вчерашний план любого статуса
+        prev_state = prev.state if prev else None
+        prev_ids = {g.key: g.group_id for g in prev.groups} if prev else {}
+        aspects, attrs, anames = load_aspects(conn), load_attrs(conn), aspect_names(conn)
+        groups, log, state = build(designs, profile, prev_state)
+        run_id = f"{as_of}-ozon"
+        n = 1
+        while store.status(run_id) is not None:                    # повторный запуск в тот же день
+            n += 1
+            run_id = f"{as_of}-ozon-{n}"
+        plan = build_plan(groups, log, state, profile, run_id=run_id, engine_version=engine_version(),
+                          inputs=inputs, platform_ids=pids, prev_ids=prev_ids, live_models=live_models(attrs),
+                          attrs=attrs, aspects=aspects, aspect_names=anames)
+        q = quality(groups)
+        for k, v in q.items():
+            print(f"{k}: {v}")
+        ch = churn(prev_state, state) if prev_state else {}
+        for k, v in ch.items():
+            print(f"churn.{k}: {v}")
+        print(f"близнецов (групп, где Озон не склеит): {len(plan.checks.twins)}")
+        for tw in plan.checks.twins[:10]:
+            print("  ", tw["group_key"], tw["designs"], tw["color"], tw["proposals"][:1])
+        print(f"неизвестных брендов: {len(unknown)}; нарушений жёстких правил: {len(plan.checks.hard_violations)}")
+        if json_path:
+            Path(json_path).write_text(plan.dumps(), encoding="utf-8")
+        if xlsx_path:
+            write_report(xlsx_path, groups, designs, log, q, churn(prev_state, state) if prev_state else None, unknown)
+        result = {"run_id": run_id, "saved": False, "groups": q.get("склеек"), "small": q.get("малых склеек"),
+                  "churn": ch, "twins": len(plan.checks.twins), "unknown_brands": len(unknown),
+                  "hard_violations": list(plan.checks.hard_violations)}
+        if plan.checks.hard_violations:
+            raise SystemExit("жёсткие нарушения, план не сохранён: " + "; ".join(plan.checks.hard_violations[:5]))
+        if dry:
+            print("--dry: в БД не пишу")
+            return result
+        store.save_draft(plan)
+        print("сохранён план", run_id)
+        result["saved"] = True
+        return result
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--profile", default=str(ROOT / "profiles" / "ozon.toml"))
@@ -56,46 +105,7 @@ def main():
     ap.add_argument("--json", default="")
     ap.add_argument("--xlsx", default="")
     a = ap.parse_args()
-    with open(a.profile, "rb") as f:
-        profile = tomllib.load(f)
-
-    with psycopg.connect(database_url()) as conn:
-        store = PgStore(conn)
-        designs, unknown, pids, inputs = load_from_db(conn, profile, a.as_of)
-        prev = store.last("ozon")                                  # теневой режим: вчерашний план любого статуса
-        prev_state = prev.state if prev else None
-        prev_ids = {g.key: g.group_id for g in prev.groups} if prev else {}
-        aspects, attrs, anames = load_aspects(conn), load_attrs(conn), aspect_names(conn)
-        groups, log, state = build(designs, profile, prev_state)
-        run_id = f"{a.as_of}-ozon"
-        n = 1
-        while store.status(run_id) is not None:                    # повторный запуск в тот же день
-            n += 1
-            run_id = f"{a.as_of}-ozon-{n}"
-        plan = build_plan(groups, log, state, profile, run_id=run_id, engine_version=engine_version(),
-                          inputs=inputs, platform_ids=pids, prev_ids=prev_ids, live_models=live_models(attrs),
-                          attrs=attrs, aspects=aspects, aspect_names=anames)
-        q = quality(groups)
-        for k, v in q.items():
-            print(f"{k}: {v}")
-        if prev_state:
-            for k, v in churn(prev_state, state).items():
-                print(f"churn.{k}: {v}")
-        print(f"близнецов (групп, где Озон не склеит): {len(plan.checks.twins)}")
-        for tw in plan.checks.twins[:10]:
-            print("  ", tw["group_key"], tw["designs"], tw["color"], tw["proposals"][:1])
-        print(f"неизвестных брендов: {len(unknown)}; нарушений жёстких правил: {len(plan.checks.hard_violations)}")
-        if a.json:
-            Path(a.json).write_text(plan.dumps(), encoding="utf-8")
-        if a.xlsx:
-            write_report(a.xlsx, groups, designs, log, q, churn(prev_state, state) if prev_state else None, unknown)
-        if plan.checks.hard_violations:
-            raise SystemExit("жёсткие нарушения, план не сохранён: " + "; ".join(plan.checks.hard_violations[:5]))
-        if a.dry:
-            print("--dry: в БД не пишу")
-            return
-        store.save_draft(plan)
-        print("сохранён план", run_id)
+    run_plan(a.as_of, a.dry, a.profile, a.json, a.xlsx)
 
 
 if __name__ == "__main__":
