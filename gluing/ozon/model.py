@@ -19,6 +19,7 @@ class OzonSku:
     roll_code: str = ""         # код рулона, например PT110
     roll_m: int = 0             # метры рулона на складе FBS Селсапа
     cut_m: int = 0              # длина отреза в метрах
+    out_days: int | None = None  # дней без остатка (None — неизвестно или остаток есть); для гистерезиса по остатку
 
 
 @dataclass

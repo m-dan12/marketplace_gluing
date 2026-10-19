@@ -397,3 +397,24 @@ def test_separating_feature_never_leaves_a_single_design_remainder():
     groups, _, _ = build(designs_from(duv(1, 2)), ACTUAL)             # 3 дизайна: кант 2 + обычный 1
     assert {g.leaf for g in groups} == {"Обычные"}
     assert [len(g.designs) for g in groups] == [3] and groups[0].kind == "малая"
+
+
+# ---------- гистерезис по остатку ----------
+def stock_sku(offer, stock, out_days):
+    s = sku(offer, SET)
+    s.stock, s.out_days = stock, out_days
+    return s
+
+
+def test_grace_period_keeps_recently_sold_out_sku_in_plan():
+    prof = {**PROFILE, "stock": {"min_total": 2, "grace_days": 14}}
+    skus = [stock_sku("PT1/4-13-26/1", 0, 5), stock_sku("PT2/4-13-26/1", 0, 14), stock_sku("PT3/4-13-26/1", 0, 15),
+            stock_sku("PT4/4-13-26/1", 0, None), stock_sku("PT5/4-13-26/1", 9, 0)]
+    ds, _ = build_designs(skus, ["skazka"] * 5, prof)
+    assert sorted(d.design for d in ds) == ["PT1", "PT2", "PT5"]            # 15 дней и «неизвестно» не удерживаются
+
+
+def test_no_grace_by_default():
+    prof = {k: v for k, v in PROFILE.items() if k != "stock"}
+    ds, _ = build_designs([stock_sku("PT1/4-13-26/1", 0, 1)], ["skazka"], prof)
+    assert ds == []

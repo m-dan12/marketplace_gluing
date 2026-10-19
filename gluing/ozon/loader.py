@@ -40,13 +40,14 @@ def build_designs(skus: list[OzonSku], accounts: list[str], profile: dict) -> tu
     В склейки идут SKU с остатком больше 1 (Озон FBO+FBS плюс отрезы из рулона)."""
     brands = profile["brands"]
     min_total = profile.get("stock", {}).get("min_total", 2)
+    grace = profile.get("stock", {}).get("grace_days", 0)
     split = profile.get("features", {}).get("split_design", False)
     rules = Rules.from_profile(profile)
     designs: dict[tuple, Design] = {}
     unknown: list[str] = []
     for s, acc in zip(skus, accounts):
-        if s.stock + s.stock_roll < min_total:
-            continue
+        if s.stock + s.stock_roll < min_total and not (s.out_days is not None and s.out_days <= grace):
+            continue                                      # остатка нет, и льготный период (grace_days) после обнуления не действует
         brand = brands.get(s.prefix)
         if brand is None:
             unknown.append(s.offer_id)                    # префикс не из списка: не склеиваем молча
@@ -78,7 +79,8 @@ def skus_from_rows(rows, rolls: dict[str, int] | None = None):
             continue                                      # артикул не по шаблону «префикс+цифры/ключ»
         s = OzonSku(offer_id=r["offer_id"], title=r["title"] or "", category=r["category"] or "",
                     stock=int(float(r["stock"] or 0)), orders28=int(float(r["orders28"] or 0)),
-                    prefix=p["prefix"], design_no=p["design"], key=p["key"], key_nums=p["key_nums"])
+                    prefix=p["prefix"], design_no=p["design"], key=p["key"], key_nums=p["key_nums"],
+                    out_days=int(r["out_days"]) if r.get("out_days") not in (None, "") else None)
         apply_roll(s, _type_of(s.category), rolls)
         skus.append(s)
         accounts.append(r["account"])

@@ -64,3 +64,22 @@ def test_target_name_held_by_offers_moving_to_another_group_is_fine():
     r = dry_run(p, live, ASP)
     assert not r.blocked and not r.warnings
     assert [(o.offer_id, o.to_value) for o in r.ops] == [("z", "g_2")]
+
+
+def test_unglue_removes_sold_out_offers_from_plan_models():
+    p = plan([group("g_1", ["a"], 1)])
+    live = {("skazka", "a"): live_item("Роза", "g_1"),
+            ("skazka", "z"): live_item("Лилия", "g_1"),            # вышел из плана, остатка нет → разлепить
+            ("skazka", "y"): live_item("Мак", "g_1"),              # вне плана, но остаток есть → не трогаем
+            ("skazka", "w"): live_item("Ирис", "w"),               # уже сам по себе
+            ("skazka", "v"): live_item("Тюльпан", "other")}        # чужая модель, не из плана
+    stock = {("skazka", "z"): 0, ("skazka", "y"): 7, ("skazka", "w"): 0, ("skazka", "v"): 0}
+    r = dry_run(p, live, ASP, stock)
+    un = [o for o in r.ops if o.op_type == "unglue_model"]
+    assert [(o.offer_id, o.from_value, o.to_value) for o in un] == [("z", "g_1", "z")]
+
+
+def test_no_unglue_without_stock_data():
+    p = plan([group("g_1", ["a"], 1)])
+    live = {("skazka", "a"): live_item("Роза", "g_1"), ("skazka", "z"): live_item("Лилия", "g_1")}
+    assert not [o for o in dry_run(p, live, ASP).ops if o.op_type == "unglue_model"]

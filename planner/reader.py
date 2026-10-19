@@ -6,7 +6,8 @@ from gluing.ozon.loader import build_designs, skus_from_rows
 # Карточки Озона + остаток последнего снимка (FBO+FBS) + заказы за окно. Остаток 0 не отбрасываем: ткани получают отрезы из рулона.
 CARDS_SQL = """
 select c.account, c.article as offer_id, c.title, c.category, c.external_id as product_id,
-       coalesce(s.stock, 0)::int as stock, coalesce(o.q, 0)::int as orders28
+       coalesce(s.stock, 0)::int as stock, coalesce(o.q, 0)::int as orders28,
+       (%(as_of)s::date - la.last_active)::int as out_days
 from product_cards c
 left join (select account, offer_id, sum(present) as stock from ozon_stocks
            where snapshot_date = (select max(snapshot_date) from ozon_stocks) group by 1, 2) s
@@ -14,6 +15,11 @@ left join (select account, offer_id, sum(present) as stock from ozon_stocks
 left join (select account, offer_id, sum(quantity) as q from ozon_orders
            where order_date >= %(as_of)s::date - %(window)s group by 1, 2) o
        on o.account = c.account and o.offer_id = c.article
+left join (select account, offer_id, max(snapshot_date) as last_active
+           from (select account, offer_id, snapshot_date, sum(present) as s from ozon_stocks
+                 where snapshot_date >= %(as_of)s::date - %(grace)s group by 1, 2, 3) d
+           where s >= %(min_total)s group by 1, 2) la
+       on la.account = c.account and la.offer_id = c.article
 where c.marketplace = 'ozon'
 """
 
@@ -30,9 +36,9 @@ select (select max(snapshot_date) from ozon_stocks), (select max(snapshot_date) 
 """
 
 
-def read_rows(conn, as_of: str, window_days: int = 28) -> list[dict]:
+def read_rows(conn, as_of: str, window_days: int = 28, grace_days: int = 0, min_total: int = 2) -> list[dict]:
     with conn.cursor() as cur:
-        cur.execute(CARDS_SQL, {"as_of": as_of, "window": window_days})
+        cur.execute(CARDS_SQL, {"as_of": as_of, "window": window_days, "grace": grace_days, "min_total": min_total})
         cols = [c.name for c in cur.description]
         return [dict(zip(cols, r)) for r in cur.fetchall()]
 
@@ -71,7 +77,8 @@ def attach_signatures(conn, designs) -> int:
 
 def load_from_db(conn, profile: dict, as_of: str, window_days: int = 28):
     """-> (дизайны, неизвестные бренды, platform_ids {(account, offer_id): {"product_id": ...}}, inputs)."""
-    rows = read_rows(conn, as_of, window_days)
+    st = profile.get("stock", {})
+    rows = read_rows(conn, as_of, window_days, st.get("grace_days", 0), st.get("min_total", 2))
     skus, accounts = skus_from_rows(rows, read_rolls(conn))
     pids = {(r["account"], r["offer_id"]): {"product_id": r["product_id"]} for r in rows}
     designs, unknown = build_designs(skus, accounts, profile)

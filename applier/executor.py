@@ -52,7 +52,7 @@ class MemoryJournal:
 class PgJournal:
     """Журнал в gluing.op. attr_id выводится из op_type, поэтому отдельной колонки не нужно."""
 
-    ATTR = {"set_model_name": MODEL_NAME_ATTR, "set_color_name": COLOR_NAME_ATTR}
+    ATTR = {"set_model_name": MODEL_NAME_ATTR, "set_color_name": COLOR_NAME_ATTR, "unglue_model": MODEL_NAME_ATTR}
 
     def __init__(self, conn):
         self.conn = conn
@@ -167,13 +167,13 @@ def _apply_group(api: Api, rows: list[dict], attr_id: int, journal: Journal, st:
 
 
 def execute(run_id: str, ops: list[Op], apis: dict[str, Api], journal: Journal, st: Settings | None = None) -> dict:
-    """Применяет операции. Сначала правки цвета (чтобы убрать близнецов), потом названия моделей."""
+    """Применяет операции. Сначала правки цвета (чтобы убрать близнецов), потом названия моделей, потом снятие с модели."""
     st = st or Settings()
     if len(ops) > st.max_ops:
         return {"stopped": "max_ops", "ops": len(ops), "limit": st.max_ops}
     ids = journal.add(run_id, ops)
     rows = [r for r in journal.rows(run_id) if r["op_id"] in set(ids)]
-    order = {"set_color_name": 0, "set_model_name": 1}
+    order = {"set_color_name": 0, "set_model_name": 1, "unglue_model": 2}
     rows.sort(key=lambda r: (order[r["op_type"]], r["account"], r["op_id"]))
     summary: Counter = Counter()
     if st.probe and rows:                                              # проба: пока одна операция не применится, дальше не идём

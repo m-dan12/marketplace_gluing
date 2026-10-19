@@ -58,8 +58,12 @@ def _first(attrs: dict, attr_id: int) -> str:
     return v[0] if v else ""
 
 
-def dry_run(plan: Plan, live: dict[tuple[str, str], dict], aspects: dict) -> DryRun:
-    """live: {(account, offer_id): {"cat": (category_id, type_id), "attrs": {attr_id: [values]}, "product_id": int|None}}"""
+def dry_run(plan: Plan, live: dict[tuple[str, str], dict], aspects: dict,
+            stock: dict[tuple[str, str], int] | None = None, min_total: int = 2) -> DryRun:
+    """live: {(account, offer_id): {"cat": (category_id, type_id), "attrs": {attr_id: [values]}, "product_id": int|None}}
+
+    stock: {(account, offer_id): остаток}. Если задан, артикулы вне плана с остатком меньше min_total, которые всё ещё
+    носят имя модели из плана, снимаются с неё (unglue_model: имя модели = собственный артикул, как у несклеенных карточек)."""
     out = DryRun(run_id=plan.run.run_id)
     fixes: dict[tuple[str, str], str] = {}        # (account, offer) -> новое «Название цвета» из предложений плана
     for t in plan.checks.twins:
@@ -121,4 +125,15 @@ def dry_run(plan: Plan, live: dict[tuple[str, str], dict], aspects: dict) -> Dry
                     out.ops.append(Op(k[0], k[1], typ, attr_id, cur, new, g.group_id, info.get("product_id")))
                 else:
                     out.already_ok += 1
+    if stock is not None:
+        targets = {(g.account, g.target.get("ozon", {}).get("model_name", g.group_id)) for g in plan.groups}
+        blocked_names = {(g.account, g.target.get("ozon", {}).get("model_name", g.group_id)) for g in plan.groups
+                         if g.group_id in {b.group_id for b in out.blocked}}
+        for (acc, offer), info in sorted(live.items()):
+            cur = _first(info["attrs"], MODEL_NAME_ATTR)
+            if (acc, offer) in planned_elsewhere or (acc, cur) not in targets or (acc, cur) in blocked_names:
+                continue
+            if cur == offer or stock.get((acc, offer), 0) >= min_total:
+                continue                                  # уже сам по себе, либо вне плана по другой причине (остаток есть)
+            out.ops.append(Op(acc, offer, "unglue_model", MODEL_NAME_ATTR, cur, offer, "", info.get("product_id")))
     return out

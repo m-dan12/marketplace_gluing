@@ -86,7 +86,10 @@ def main() -> None:
             print(f"план {rid} согласован ({a.by})")
             return
 
-        res = dry_run(plan, load_attrs(conn), load_aspects(conn))
+        with conn.cursor() as cur:
+            cur.execute("select account, offer_id, sum(present) from ozon_stocks where snapshot_date=(select max(snapshot_date) from ozon_stocks) group by 1,2")
+            stock = {(a_, o_): int(s_ or 0) for a_, o_, s_ in cur.fetchall()}
+        res = dry_run(plan, load_attrs(conn), load_aspects(conn), stock)
         conn.rollback()
         accounts = {x.strip() for x in a.accounts.split(",") if x.strip()}
         types = {x.strip() for x in a.types.split(",") if x.strip()}
