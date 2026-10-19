@@ -71,6 +71,7 @@ def dry_run(plan: Plan, live: dict[tuple[str, str], dict], aspects: dict) -> Dry
         name = _first(info["attrs"], MODEL_NAME_ATTR)
         if name:
             holders[(acc, name)].append(off)
+    planned_elsewhere = {(g.account, m.offer_id) for g in plan.groups for d in g.designs for m in d.members}
     for g in plan.groups:
         reasons: list[str] = []
         members = [(g.account, m.offer_id) for d in g.designs for m in d.members]
@@ -101,9 +102,11 @@ def dry_run(plan: Plan, live: dict[tuple[str, str], dict], aspects: dict) -> Dry
             sig_seen.setdefault(sig, k[1])
         target = g.target.get("ozon", {}).get("model_name", g.group_id)
         own = {o for _, o in members}
-        foreign = [o for o in holders.get((g.account, target), []) if o not in own]
-        if foreign:                                   # имя модели уже занято чужими артикулами: после записи они склеятся с группой
-            reasons.append(f"имя модели «{target}» уже у {len(foreign)} чужих арт., например {foreign[0]}")
+        # чужие держатели имени: если они в плане переезжают в другую группу, конфликта нет, они получат своё имя;
+        # остаются только те, которые плану не принадлежат вовсе
+        foreign = [o for o in holders.get((g.account, target), []) if o not in own and (g.account, o) not in planned_elsewhere]
+        if foreign:
+            out.warnings.append(f"{g.group_id}: имя модели «{target}» останется у {len(foreign)} арт. вне плана, например {foreign[0]}")
         if reasons:
             out.blocked.append(Blocked(g.group_id, reasons))
             continue

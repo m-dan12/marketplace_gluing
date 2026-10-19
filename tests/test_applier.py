@@ -51,8 +51,16 @@ def test_live_twins_block_group_unless_color_fix_planned():
         ("b", "set_color_name", "Бисер 2"), ("a", "set_model_name", "g_1"), ("b", "set_model_name", "g_1")}
 
 
-def test_target_name_taken_by_foreign_offers_blocks_group():
+def test_target_name_held_by_unplanned_offers_is_a_warning_only():
     p = plan([group("g_1", ["a"], 1)])
-    live = {("skazka", "a"): live_item("Роза"), ("skazka", "z"): live_item("Лилия", "g_1")}
+    live = {("skazka", "a"): live_item("Роза"), ("skazka", "z"): live_item("Лилия", "g_1")}   # z не в плане
     r = dry_run(p, live, ASP)
-    assert r.blocked and "чужих" in r.blocked[0].reasons[0]
+    assert not r.blocked and any("вне плана" in w for w in r.warnings)
+
+
+def test_target_name_held_by_offers_moving_to_another_group_is_fine():
+    p = plan([group("g_1", ["a"], 1), group("g_2", ["z"], 1)])
+    live = {("skazka", "a"): live_item("Роза", "g_1"), ("skazka", "z"): live_item("Лилия", "g_1")}   # z уйдёт в g_2
+    r = dry_run(p, live, ASP)
+    assert not r.blocked and not r.warnings
+    assert [(o.offer_id, o.to_value) for o in r.ops] == [("z", "g_2")]

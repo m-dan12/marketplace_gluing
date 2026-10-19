@@ -23,7 +23,7 @@ from gluing.ozon.tree import build
 from planner.plan import build_plan
 from planner.reader import load_from_db
 from planner.store import PgStore
-from planner.twins import load_aspects, load_attrs, aspect_names
+from planner.twins import load_aspects, load_attrs, aspect_names, live_models
 
 ROOT = Path(__file__).resolve().parent
 
@@ -73,7 +73,7 @@ def main():
             n += 1
             run_id = f"{a.as_of}-ozon-{n}"
         plan = build_plan(groups, log, state, profile, run_id=run_id, engine_version=engine_version(),
-                          inputs=inputs, platform_ids=pids, prev_ids=prev_ids,
+                          inputs=inputs, platform_ids=pids, prev_ids=prev_ids, live_models=live_models(attrs),
                           attrs=attrs, aspects=aspects, aspect_names=anames)
         q = quality(groups)
         for k, v in q.items():

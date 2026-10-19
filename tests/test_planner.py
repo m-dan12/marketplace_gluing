@@ -21,9 +21,13 @@ def test_new_id_is_stable_and_short():
     assert new_id("x").startswith("g_") and len(new_id("x")) == 10
 
 
-def test_prev_id_wins_by_key():
+def test_live_name_wins_over_previous_plan():
     ids = assign_ids([("k1", ["a", "b"])], prev_ids={"k1": "g_old"}, live_models={"a": "Model", "b": "Model"})
-    assert ids["k1"] == "g_old"
+    assert ids["k1"] == "Model"                               # реальное имя на площадке важнее вчерашнего плана
+
+
+def test_prev_id_used_when_no_live_name():
+    assert assign_ids([("k1", ["a", "b"])], prev_ids={"k1": "g_old"})["k1"] == "g_old"
 
 
 def test_inherit_live_model_name_when_half_match():

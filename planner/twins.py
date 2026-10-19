@@ -76,3 +76,13 @@ def distinguishing_value(acc: str, first: list[str], other: list[str], attrs: di
             if 0 < len(text) <= MAX_TAIL and any(ch.isalpha() for ch in text):
                 return text, name
     return "", ""
+
+
+def live_models(attrs: dict, attr_id: int = 9048) -> dict[str, str]:
+    """{offer_id: живое «Название модели»} из снимка атрибутов (артикулы разных кабинетов не пересекаются)."""
+    out = {}
+    for (acc, offer), info in attrs.items():
+        v = (info["attrs"].get(str(attr_id)) or [""])[0]
+        if v:
+            out[offer] = v
+    return out
