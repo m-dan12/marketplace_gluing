@@ -33,8 +33,10 @@ RECEIVER = r"""param($name)
 $base = 'C:\Users\User_2\marketplace'
 $d = Join-Path $base $name
 $z = Join-Path $env:TEMP ($name + '.zip')
-$b64 = [Console]::In.ReadToEnd().Trim()
+$f = Join-Path $env:TEMP ($name + '.b64')
+$b64 = (Get-Content $f -Raw) -replace '\s', ''
 [IO.File]::WriteAllBytes($z, [Convert]::FromBase64String($b64))
+Remove-Item $f
 New-Item -ItemType Directory -Force $d | Out-Null
 Get-ChildItem $d -Force | Where-Object { $_.Name -ne '.env' } | Remove-Item -Recurse -Force
 Expand-Archive -Force $z $d
@@ -47,7 +49,13 @@ def ship(repo: Path, name: str) -> None:
     zipped = subprocess.run(["git", "-C", str(repo), "archive", "--format=zip", "HEAD"], capture_output=True, check=True).stdout
     remote(r'powershell -NoProfile -Command "[Console]::In.ReadToEnd() | Set-Content -Encoding UTF8 $env:TEMP\recv_deploy.ps1"',
            RECEIVER.encode("utf-8"))
-    print(remote(rf"powershell -NoProfile -ExecutionPolicy Bypass -File %TEMP%\recv_deploy.ps1 {name}", base64.b64encode(zipped)).strip())
+    b64 = base64.encodebytes(zipped).decode("ascii")             # строки по 76 символов; одним куском stdin зависает
+    lines, step = b64.splitlines(keepends=True), 350                # ~27 КБ за раз
+    remote(rf"if exist %TEMP%\{name}.b64 del %TEMP%\{name}.b64")
+    for k in range(0, len(lines), step):
+        remote(rf'powershell -NoProfile -Command "[Console]::In.ReadToEnd() | Add-Content -Encoding ascii -NoNewline $env:TEMP\{name}.b64"',
+               "".join(lines[k:k + step]).encode("ascii"))
+    print(remote(rf"powershell -NoProfile -ExecutionPolicy Bypass -File %TEMP%\recv_deploy.ps1 {name}").strip())
 
 
 def main() -> None:
