@@ -210,7 +210,8 @@ def build(designs: list[Design], profile: dict, prev: dict | None = None):
                     members[tgt].extend(members.pop(f))
             sep = {f: v for f, v in members.items() if f != default}
             rest = members.get(default, [])
-            while sep and 0 < len(rest) < mn and not feat_free:   # остаток обычной ветки должен быть жизнеспособным
+            need = small_min if feat_free else mn                 # остаток обычной ветки должен быть жизнеспособным
+            while sep and 0 < len(rest) < need:
                 f = min(sep, key=lambda x: len(sep[x]))
                 note(node, "признак", f, len(sep[f]), "возвращён: остаток обычных меньше минимума")
                 rest = rest + sep.pop(f)

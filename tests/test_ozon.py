@@ -378,3 +378,22 @@ def test_profile_rules_match_documented_cases():
     assert r.feature("Комплект постельного белья", sku("PT1/4-13-26/1")) == "Обычные"
     assert r.feature("Скатерть", sku("PT1/2-120150", CLOTH)) == "Новогодние"
     assert r.feature("Скатерть", sku("PT1/2-140140", CLOTH)) == "Обычные"
+
+
+# ---------- ветки признака из одного дизайна и одиночный остаток ----------
+def duv(plain, kant, start=1000):
+    return ([sku(f"PT{start + i}/5-0-0/1", DUV) for i in range(plain)]
+            + [sku(f"PT{start + 500 + i}/42-0-0/1kant", DUV) for i in range(kant)])
+
+
+def test_feature_branch_is_not_kept_when_only_one_design_remains():
+    _, _, day1 = build(designs_from(duv(6, 2)), ACTUAL)
+    assert any(g.leaf == "Кант" for g in build(designs_from(duv(6, 2)), ACTUAL)[0])
+    groups, _, _ = build(designs_from(duv(6, 1)), ACTUAL, day1)         # вчера отделён, сегодня остался 1 дизайн
+    assert {g.leaf for g in groups} == {"Обычные"} and all(g.kind != "один дизайн" for g in groups)
+
+
+def test_separating_feature_never_leaves_a_single_design_remainder():
+    groups, _, _ = build(designs_from(duv(1, 2)), ACTUAL)             # 3 дизайна: кант 2 + обычный 1
+    assert {g.leaf for g in groups} == {"Обычные"}
+    assert [len(g.designs) for g in groups] == [3] and groups[0].kind == "малая"
