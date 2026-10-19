@@ -51,8 +51,11 @@ def twins_check(groups: list[OGroup], attrs: dict, aspects: dict, names: dict[in
                 for v in (attrs.get((a, o), {}).get("attrs", {}).get(str(cid)) or [])}
         props, n = [], 1
         from planner.twins import distinguishing_value
-        for d in designs[1:]:
-            tail, source = distinguishing_value(acc, by_design[designs[0]], by_design[d], attrs, aspects, names)
+        # внутри одного дизайна (два артикула с одинаковыми вариантами) правим каждый артикул, кроме первого
+        units = [(d, by_design[d]) for d in designs[1:]] if len(designs) > 1 else                 [(designs[0], [o]) for o in sorted(by_design[designs[0]])[1:]]
+        first = by_design[designs[0]] if len(designs) > 1 else sorted(by_design[designs[0]])[:1]
+        for d, offs in units:
+            tail, source = distinguishing_value(acc, first, offs, attrs, aspects, names)
             new = f"{color}, {tail}".strip(", ") if tail else ""
             if not new or new in used:                  # нет различающегося атрибута или имя занято: порядковый номер
                 n += 1
@@ -60,7 +63,7 @@ def twins_check(groups: list[OGroup], attrs: dict, aspects: dict, names: dict[in
                     n += 1
                 new, source = f"{color} {n}".strip(), "порядковый номер"
             used.add(new)
-            props.append({"design": d, "offers": by_design[d], "attr": "Название цвета", "new_value": new, "source": source})
+            props.append({"design": d, "offers": offs, "attr": "Название цвета", "new_value": new, "source": source})
         out.append({"group_key": t["group_id"], "color": color, "offers": t["offers"], "designs": designs,
                     "same_design": len(designs) == 1, "proposals": props})
     return out

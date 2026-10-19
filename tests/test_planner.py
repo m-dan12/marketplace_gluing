@@ -195,3 +195,20 @@ def test_min_overlap_floor_prevents_weak_reuse():
     ids = assign_ids([("k", ["a", "b", "c", "d", "e"])], live_models={"a": "M1"}, min_overlap=0.5)
     assert ids["k"] == new_id("k")
     assert assign_ids([("k", ["a", "b", "c", "d", "e"])], live_models={"a": "M1"}, min_overlap=0.1)["k"] == "M1"
+
+
+def test_twins_inside_one_design_get_proposals_per_sku():
+    from gluing.ozon.model import Design, OGroup, OzonSku
+    from planner.plan import twins_check
+
+    def sk(o):
+        return OzonSku(offer_id=o, title="", category="", stock=5, orders28=0, prefix="PT", design_no="4360", key="1", key_nums=())
+
+    g = OGroup(key="k", account="skazka", brand="Сказка", typ="Комплект", leaf="Обычные", idx=1, kind="склейка",
+               designs=[Design(account="skazka", brand="Сказка", typ="Комплект", design="PT4360", digits="4360", skus=[sk("a"), sk("b"), sk("c")])])
+    cat = (1, 2)
+    mk = {"cat": cat, "name": "", "attrs": {"10097": ["Сердечки"], "6771": ["160x200"]}}
+    attrs = {("skazka", o): mk for o in "abc"}
+    aspects = {cat: {10097: "Название цвета", 6771: "Размер простыни"}}
+    tw = twins_check([g], attrs, aspects, {10097: "Название цвета", 6771: "Размер простыни"})
+    assert tw[0]["same_design"] and [(p["offers"], p["new_value"]) for p in tw[0]["proposals"]] == [(["b"], "Сердечки 2"), (["c"], "Сердечки 3")]
