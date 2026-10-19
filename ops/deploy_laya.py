@@ -31,9 +31,9 @@ $name + ': ' + @(Get-ChildItem $d -Recurse -File).Count + ' files'
 """
 
 
-def remote(cmd: str, data: bytes | None = None) -> str:
+def remote(cmd: str, data: bytes | None = None, timeout: int = 180) -> str:
     try:
-        r = subprocess.run(SSH + [cmd], input=data, capture_output=True, timeout=180)
+        r = subprocess.run(SSH + [cmd], input=data, capture_output=True, timeout=timeout)
     except subprocess.TimeoutExpired:
         raise SystemExit(f"таймаут на laya-server: {cmd[:120]}")
     out = (r.stdout + r.stderr).decode("cp866", "replace")
@@ -69,7 +69,7 @@ def main() -> None:
     if not a.no_install:
         py = rf"{BASE}\venv\Scripts\python.exe"
         remote(f"if not exist {py} (python -m venv {BASE}\\venv)")
-        print(remote(f"{py} -m pip install -q --disable-pip-version-check -r {BASE}\\gluing\\requirements.txt {BASE}\\bus"))
+        print(remote(f"{py} -m pip install -q --disable-pip-version-check -r {BASE}\\gluing\\requirements.txt {BASE}\\bus", timeout=900))
         print(remote(f"{py} -c \"import ortools, psycopg, busclient; print('venv ok', ortools.__version__)\""))
 
 
