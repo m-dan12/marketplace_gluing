@@ -12,7 +12,7 @@ from collections import Counter, defaultdict
 
 from ..lists import child_designs, eco_designs
 from ..parsing import design_candidates
-from .features import BED, DEFAULT, FALLBACK
+from .features import Rules
 from .model import Design, OGroup
 
 
@@ -132,6 +132,8 @@ def _merge_same_design(ds: list[Design]) -> tuple[list[Design], dict[int, list[s
 
 def build(designs: list[Design], profile: dict, prev: dict | None = None):
     """Возвращает (группы, журнал решений, состояние для завтрашнего запуска)."""
+    rules = Rules.from_profile(profile)
+    BED, DEFAULT, FALLBACK = rules.bed, rules.default, rules.fallback
     lim, hy = profile["limits"], profile["hysteresis"]
     mx, mn, small_min = lim["max_group"], lim["min_group"], lim["small_group_min"]
     prev_dec = (prev or {}).get("decisions", {})

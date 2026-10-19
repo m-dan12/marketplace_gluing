@@ -6,7 +6,7 @@ import re
 from pathlib import Path
 
 from ..parsing import parse_article
-from .features import pick_feature, sku_feature
+from .features import Rules
 from .model import Design, OzonSku
 
 FABRIC_TYPE = "Ткань"
@@ -41,6 +41,7 @@ def build_designs(skus: list[OzonSku], accounts: list[str], profile: dict) -> tu
     brands = profile["brands"]
     min_total = profile.get("stock", {}).get("min_total", 2)
     split = profile.get("features", {}).get("split_design", False)
+    rules = Rules.from_profile(profile)
     designs: dict[tuple, Design] = {}
     unknown: list[str] = []
     for s, acc in zip(skus, accounts):
@@ -51,7 +52,7 @@ def build_designs(skus: list[OzonSku], accounts: list[str], profile: dict) -> tu
             unknown.append(s.offer_id)                    # префикс не из списка: не склеиваем молча
             continue
         typ = _type_of(s.category)
-        f = sku_feature(typ, s)
+        f = rules.feature(typ, s)
         key = (acc, brand, typ, s.prefix + s.design_no, f if split else "")
         d = designs.get(key)
         if d is None:
@@ -62,7 +63,7 @@ def build_designs(skus: list[OzonSku], accounts: list[str], profile: dict) -> tu
     out = list(designs.values())
     for d in out:
         if not d.split:
-            d.feature = pick_feature(d)
+            d.feature = rules.pick(d)
     return out, unknown
 
 

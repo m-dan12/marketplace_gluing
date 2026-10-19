@@ -337,3 +337,44 @@ def test_tablecloth_key_150_is_own_branch():
 def test_tablecloth_few_new_year_designs_fall_back_when_single():
     groups, _, _ = build(designs_from(cloth_set(1, 12)), ACTUAL)
     assert {g.leaf for g in groups} == {"Обычные"}                                # один дизайн: отдельной ветки нет
+
+
+# ---------- признаки из профиля (регулярные выражения) ----------
+def test_new_feature_is_added_by_profile_row_without_code():
+    from gluing.ozon.features import Rules
+    feats = {**ACTUAL["features"], "types": {**ACTUAL["features"]["types"], "Полотенце": {
+        "default": "Обычные", "fallback": {"Банные": "Обычные"},
+        "rules": [{"name": "Банные", "key": r"^3-\d+$", "title": "банн"}]}}}
+    rules = Rules(feats)
+    s = sku("PT1/3-70140/1", "Полотенца > Полотенце", title="Полотенце банное")
+    assert rules.feature("Полотенце", s) == "Банные"
+    assert rules.feature("Полотенце", sku("PT1/3-70140/1", "Полотенца > Полотенце", title="Полотенце кухонное")) == "Обычные"
+    assert rules.feature("Неизвестный тип", s) == "—"
+
+
+def test_rule_conditions_are_and_and_first_match_wins():
+    from gluing.ozon.features import Rules
+    r = Rules({"types": {"Т": {"default": "d", "rules": [
+        {"name": "a", "key": "^1", "title": "x"}, {"name": "b", "key": "^1"}]}}})
+    assert r.feature("Т", sku("PT1/1-2-3/1", "К > Т", title="x")) == "a"
+    assert r.feature("Т", sku("PT1/1-2-3/1", "К > Т", title="y")) == "b"
+    assert r.feature("Т", sku("PT1/2-2-3/1", "К > Т", title="x")) == "d"
+
+
+def test_bad_rules_are_rejected():
+    import pytest
+    from gluing.ozon.features import Rules
+    with pytest.raises(ValueError):
+        Rules({"types": {"Т": {"default": "d", "rules": [{"name": "a"}]}}})                 # нет условий
+    with pytest.raises(ValueError):
+        Rules({"types": {"Т": {"default": "d", "rules": [{"name": "a", "ключ": "1"}]}}})    # неизвестное поле
+
+
+def test_profile_rules_match_documented_cases():
+    from gluing.ozon.features import Rules
+    r = Rules.from_profile(ACTUAL)
+    assert r.feature("Комплект постельного белья", sku("PT1/44-0-0/1")) == "Ромбы"
+    assert r.feature("Комплект постельного белья", sku("PT1/4-13-17/1")) == "Рюши"
+    assert r.feature("Комплект постельного белья", sku("PT1/4-13-26/1")) == "Обычные"
+    assert r.feature("Скатерть", sku("PT1/2-120150", CLOTH)) == "Новогодние"
+    assert r.feature("Скатерть", sku("PT1/2-140140", CLOTH)) == "Обычные"
