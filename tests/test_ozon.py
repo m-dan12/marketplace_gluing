@@ -313,3 +313,27 @@ def test_twins_in_small_group_are_reported_not_hidden():
     groups, log, _ = build(ds, PROFILE)
     assert where(groups, "PT1000") == where(groups, "PT1001")
     assert [r for r in log if r["level"] == "близнецы"]
+
+
+# ---------- скатерти: новогодняя линейка по ключу ----------
+CLOTH = "Полотенца и скатерти > Скатерть"
+
+
+def cloth_set(n_ny, n_plain):
+    out = [sku(f"PT{1000 + i}/2-120150", CLOTH) for i in range(n_ny)]
+    out += [sku(f"PT{1000 + i}/2-180150", CLOTH) for i in range(n_ny)]            # размеры того же новогоднего дизайна
+    out += [sku(f"PT{3000 + i}/2-140140", CLOTH) for i in range(n_plain)]
+    return out
+
+
+def test_tablecloth_key_150_is_own_branch():
+    groups, _, _ = build(designs_from(cloth_set(7, 12)), ACTUAL)
+    assert {g.leaf: len(g.designs) for g in groups} == {"Новогодние": 7, "Обычные": 12}
+    for g in groups:
+        for d in g.designs:
+            assert all(s.key.endswith("150") == (g.leaf == "Новогодние") for s in d.skus)
+
+
+def test_tablecloth_few_new_year_designs_fall_back_when_single():
+    groups, _, _ = build(designs_from(cloth_set(1, 12)), ACTUAL)
+    assert {g.leaf for g in groups} == {"Обычные"}                                # один дизайн: отдельной ветки нет
