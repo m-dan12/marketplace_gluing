@@ -13,6 +13,7 @@ from collections import Counter, defaultdict
 from ..lists import child_designs, eco_designs
 from ..parsing import design_candidates
 from .features import Rules
+from . import parts_solver
 from .model import Design, OGroup
 
 
@@ -134,6 +135,7 @@ def build(designs: list[Design], profile: dict, prev: dict | None = None):
     """Возвращает (группы, журнал решений, состояние для завтрашнего запуска)."""
     rules = Rules.from_profile(profile)
     BED, DEFAULT, FALLBACK = rules.bed, rules.default, rules.fallback
+    sv = profile.get("solver", {})
     lim, hy = profile["limits"], profile["hysteresis"]
     mx, mn, small_min = lim["max_group"], lim["min_group"], lim["small_group_min"]
     prev_dec = (prev or {}).get("decisions", {})
@@ -174,7 +176,10 @@ def build(designs: list[Design], profile: dict, prev: dict | None = None):
             k = math.ceil(n / mx)
             if k == 1 and n >= 2 * mn and _clashes(ds):    # близнецов можно развести только по двум группам
                 k = 2
-            parts = _assign_parts(ds, k, prefix, prev_asg, mx, mn)
+            parts = None
+            if k >= 2 and sv.get("parts", "greedy") == "cpsat":      # решатель; нет решения или нет ortools: жадная раскладка
+                parts = parts_solver.solve_parts(ds, k, prefix, prev_asg, mx, mn, sv.get("weights"), sv.get("time_limit", 10))
+            parts = parts or _assign_parts(ds, k, prefix, prev_asg, mx, mn)
         for a, b in _separate_twins(parts, mx, mn) if len(ds) > 1 else []:
             note(f"{acc}|{brand}|{typ}", "близнецы", f"{a.design} ~ {b.design}", len(ds), "в одной группе, развести нельзя")
         for idx, part in parts.items():

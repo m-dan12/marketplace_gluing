@@ -33,6 +33,7 @@ class Design:
     skus: list[OzonSku] = field(default_factory=list)
     features: Counter = field(default_factory=Counter)   # признаки SKU
     feature: str = ""                             # признак дизайна в дереве
+    demand: float | None = None                   # прогноз спроса (если посчитан); иначе сила = заказы за 28 дней
     sigs: frozenset = field(default_factory=frozenset, compare=False)   # подписи вариантов SKU (для поиска близнецов)
     split: bool = False                           # дизайн разделён по признаку: единица = (дизайн, признак)
 
@@ -44,6 +45,11 @@ class Design:
     @property
     def orders(self) -> int:
         return sum(s.orders28 for s in self.skus)
+
+    @property
+    def power(self) -> float:
+        """Сила дизайна для баланса групп: прогноз спроса, а если его нет, заказы за 28 дней."""
+        return float(self.orders) if self.demand is None else self.demand
 
 
 @dataclass
