@@ -109,6 +109,8 @@ def dry_run(plan: Plan, live: dict[tuple[str, str], dict], aspects: dict,
         # чужие держатели имени: если они в плане переезжают в другую группу, конфликта нет, они получат своё имя;
         # остаются только те, которые плану не принадлежат вовсе
         foreign = [o for o in holders.get((g.account, target), []) if o not in own and (g.account, o) not in planned_elsewhere]
+        if stock is not None:                           # без остатка такие артикулы снимаются операцией unglue_model, это не предупреждение
+            foreign = [o for o in foreign if stock.get((g.account, o), 0) >= min_total]
         if foreign:
             out.warnings.append(f"{g.group_id}: имя модели «{target}» останется у {len(foreign)} арт. вне плана, например {foreign[0]}")
         if reasons:
