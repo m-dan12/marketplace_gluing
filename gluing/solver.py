@@ -30,7 +30,8 @@ DEFAULT_WEIGHTS = {"groups": 100, "small_min": 5000, "small_soft": 300, "span": 
 
 
 def available() -> bool:
-    return cp_model is not None
+    from gluing import cpsat_probe
+    return cp_model is not None and cpsat_probe.works()
 
 
 def _spread_by_orders(cards: list[Card], counts: list[int]) -> list[list[Card]]:

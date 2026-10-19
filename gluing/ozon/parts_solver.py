@@ -12,19 +12,21 @@ try:
 except Exception:                                          # ortools не установлен: вызывающий код вернётся к жадной раскладке
     cp_model = None
 
+from gluing import cpsat_probe
+
 from .model import Design
 
 DEFAULT_WEIGHTS = {"move": 60, "balance": 2, "size": 15, "mix": 200}
 
 
 def available() -> bool:
-    return cp_model is not None
+    return cp_model is not None and cpsat_probe.works()
 
 
 def solve_parts(ds: list[Design], k: int, prefix: str, prev_asg: dict, mx: int, mn: int,
                 weights: dict | None = None, time_limit: float = 10.0, hit_share: float = 0.2):
     """-> {номер части: [дизайны]} или None, если решения нет (тогда вызывающий использует жадную раскладку)."""
-    if cp_model is None or k < 2 or not ds:
+    if k < 2 or not ds or not available():
         return None
     w = {**DEFAULT_WEIGHTS, **(weights or {})}
     n = len(ds)

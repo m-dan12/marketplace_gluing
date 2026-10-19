@@ -60,3 +60,25 @@ def test_infeasible_returns_none_and_fallback_to_greedy(monkeypatch):
     assert parts_solver.solve_parts(ds, 1, "p", {}, 18, 6) is None                    # одной части решатель не нужен
     monkeypatch.setattr(parts_solver, "cp_model", None)
     assert solve(ds, 2) is None
+
+
+def test_solver_is_disabled_when_probe_fails(monkeypatch):
+    from gluing import cpsat_probe
+    monkeypatch.setattr(cpsat_probe, "works", lambda timeout=0: False)
+    assert solve([design(i) for i in range(30)], 2) is None
+
+
+def test_probe_reports_ok_here_and_caches():
+    from gluing import cpsat_probe
+    cpsat_probe.reset()
+    assert cpsat_probe.works() is True and cpsat_probe.reason() == ""
+    cpsat_probe.reset()
+
+
+def test_probe_detects_crashing_interpreter(monkeypatch):
+    import subprocess
+    from gluing import cpsat_probe
+    cpsat_probe.reset()
+    monkeypatch.setattr(cpsat_probe, "_CODE", "import os; os._exit(3221225477 % 256)")        # имитация падения процесса
+    assert cpsat_probe.works() is False and "отключён" in cpsat_probe.reason()
+    cpsat_probe.reset()
