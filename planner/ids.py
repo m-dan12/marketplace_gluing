@@ -12,26 +12,29 @@ def new_id(key: str) -> str:
 
 
 def assign_ids(groups: list[tuple[str, list[str]]], prev_ids: dict[str, str] | None = None,
-               live_models: dict[str, str] | None = None) -> dict[str, str]:
+               live_models: dict[str, str] | None = None, min_overlap: float = MIN_OVERLAP) -> dict[str, str]:
     """groups: [(key, [offer_id...])] -> {key: group_id}.
 
-    live_models — {offer_id: «Название модели» на площадке}; группа наследует имя, которым уже
-    называется не менее половины её артикулов, если имя ещё не занято (реальность важнее прошлого плана).
+    live_models — {offer_id: «Название модели» на площадке}. Живые имена раздаются группам по максимальному перекрытию
+    (пары «группа — имя» по убыванию числа общих артикулов; имя и группа берутся один раз), чтобы минимум артикулов
+    сменили модель. Группа берёт имя, если оно у не менее доли `min_overlap` её артикулов. Реальность важнее прошлого плана.
     prev_ids  — {key: group_id} прошлого плана; если живого имени нет, ключ сохранился, значит id тот же.
-    Порядок обработки детерминирован (по убыванию размера, затем по ключу), поэтому результат повторяем.
+    Результат детерминирован: порядок пар фиксирован (число артикулов, затем ключ и имя).
     """
     prev_ids, live_models = prev_ids or {}, live_models or {}
     out: dict[str, str] = {}
     taken: set[str] = set()
-    for key, offers in sorted(groups, key=lambda g: (-len(g[1]), g[0])):      # сначала то, что реально стоит на площадке
+    pairs = []
+    for key, offers in groups:
         if not offers:
             continue
-        cnt = Counter(live_models[o] for o in offers if live_models.get(o))
-        for name, c in sorted(cnt.items(), key=lambda x: (-x[1], x[0])):
-            if name not in taken and c / len(offers) >= MIN_OVERLAP:
-                out[key] = name
-                taken.add(name)
-                break
+        for name, c in Counter(live_models[o] for o in offers if live_models.get(o)).items():
+            if c / len(offers) >= min_overlap:
+                pairs.append((-c, key, name))
+    for _, key, name in sorted(pairs):
+        if key not in out and name not in taken:
+            out[key] = name
+            taken.add(name)
     for key, _ in groups:                                   # затем id прошлого плана для той же ветки
         gid = prev_ids.get(key)
         if key not in out and gid and gid not in taken:

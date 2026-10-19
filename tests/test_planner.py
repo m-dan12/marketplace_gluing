@@ -181,3 +181,17 @@ def test_twin_proposal_uses_distinguishing_attribute_first():
 def test_twin_proposal_ignores_service_attributes_and_falls_back_to_ordinal():
     tw = _cloth_groups({"501": ["один текст"]}, {"501": ["другой текст"]})      # аннотация в служебных
     assert tw[0]["proposals"][0]["new_value"] == "Бисер 2" and tw[0]["proposals"][0]["source"] == "порядковый номер"
+
+
+def test_live_names_go_to_max_overlap_pairs_not_biggest_group():
+    # M1 у a,b,c (в группе big) и у d (в small); M2 у e. Максимум общих артикулов у пары (big, M1) — 3.
+    groups = [("big", ["a", "b", "c", "x"]), ("small", ["d", "e"])]
+    live = {"a": "M1", "b": "M1", "c": "M1", "d": "M1", "e": "M2"}
+    ids = assign_ids(groups, live_models=live, min_overlap=0.2)
+    assert ids["big"] == "M1" and ids["small"] == "M2"
+
+
+def test_min_overlap_floor_prevents_weak_reuse():
+    ids = assign_ids([("k", ["a", "b", "c", "d", "e"])], live_models={"a": "M1"}, min_overlap=0.5)
+    assert ids["k"] == new_id("k")
+    assert assign_ids([("k", ["a", "b", "c", "d", "e"])], live_models={"a": "M1"}, min_overlap=0.1)["k"] == "M1"
