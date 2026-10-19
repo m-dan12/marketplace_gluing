@@ -4,7 +4,7 @@ from __future__ import annotations
 import hashlib
 from collections import Counter
 
-MIN_OVERLAP = 0.5
+MIN_OVERLAP = 0.2        # по живым данным: 0.5 оставляет в своей модели 19% артикулов, 0.2 — 37%, ниже порога выигрыша нет
 
 
 def new_id(key: str) -> str:

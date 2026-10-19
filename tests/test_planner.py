@@ -37,7 +37,7 @@ def test_inherit_live_model_name_when_half_match():
 
 def test_no_inherit_below_half_and_name_not_reused():
     ids = assign_ids([("k1", ["a", "b", "c", "d"]), ("k2", ["e", "f"])],
-                     live_models={"a": "M1", "e": "M1", "f": "M1"})
+                     live_models={"a": "M1", "e": "M1", "f": "M1"}, min_overlap=0.5)
     assert ids["k1"] == new_id("k1")                         # 1 из 4 — мало
     assert ids["k2"] == "M1"
     assert len(set(ids.values())) == 2
