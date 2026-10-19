@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import argparse
+import base64
 import subprocess
 import sys
 from pathlib import Path
@@ -27,14 +28,13 @@ def remote(cmd: str, data: bytes | None = None) -> str:
     return out
 
 
-# Приёмный скрипт кладётся на laya-server файлом, затем запускается с zip на stdin (вложенные кавычки cmd/PowerShell ненадёжны).
+# Приёмный скрипт кладётся на laya-server файлом, затем запускается с zip (base64) на stdin (вложенные кавычки cmd/PowerShell ненадёжны).
 RECEIVER = r"""param($name)
 $base = 'C:\Users\User_2\marketplace'
 $d = Join-Path $base $name
 $z = Join-Path $env:TEMP ($name + '.zip')
-$ms = New-Object IO.MemoryStream
-[Console]::OpenStandardInput().CopyTo($ms)
-[IO.File]::WriteAllBytes($z, $ms.ToArray())
+$b64 = [Console]::In.ReadToEnd().Trim()
+[IO.File]::WriteAllBytes($z, [Convert]::FromBase64String($b64))
 New-Item -ItemType Directory -Force $d | Out-Null
 Get-ChildItem $d -Force | Where-Object { $_.Name -ne '.env' } | Remove-Item -Recurse -Force
 Expand-Archive -Force $z $d
@@ -47,7 +47,7 @@ def ship(repo: Path, name: str) -> None:
     zipped = subprocess.run(["git", "-C", str(repo), "archive", "--format=zip", "HEAD"], capture_output=True, check=True).stdout
     remote(r'powershell -NoProfile -Command "[Console]::In.ReadToEnd() | Set-Content -Encoding UTF8 $env:TEMP\recv_deploy.ps1"',
            RECEIVER.encode("utf-8"))
-    print(remote(rf"powershell -NoProfile -ExecutionPolicy Bypass -File %TEMP%\recv_deploy.ps1 {name}", zipped).strip())
+    print(remote(rf"powershell -NoProfile -ExecutionPolicy Bypass -File %TEMP%\recv_deploy.ps1 {name}", base64.b64encode(zipped)).strip())
 
 
 def main() -> None:
