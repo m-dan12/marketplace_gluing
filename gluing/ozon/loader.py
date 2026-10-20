@@ -8,6 +8,7 @@ from pathlib import Path
 from ..parsing import parse_article
 from .features import Rules
 from .model import Design, OzonSku
+from .sizes import Sizes
 
 FABRIC_TYPE = "Ткань"
 _CUT = re.compile(r"^1-(\d+)00220$")          # ключ ткани: 1-500220 = отрез 5 м × 2,2 м
@@ -43,6 +44,7 @@ def build_designs(skus: list[OzonSku], accounts: list[str], profile: dict) -> tu
     grace = profile.get("stock", {}).get("grace_days", 0)
     split = profile.get("features", {}).get("split_design", False)
     rules = Rules.from_profile(profile)
+    sizes = Sizes.from_profile(profile)
     designs: dict[tuple, Design] = {}
     unknown: list[str] = []
     for s, acc in zip(skus, accounts):
@@ -54,11 +56,12 @@ def build_designs(skus: list[OzonSku], accounts: list[str], profile: dict) -> tu
             continue
         typ = _type_of(s.category)
         f = rules.feature(typ, s)
-        key = (acc, brand, typ, s.prefix + s.design_no, f if split else "")
+        size = sizes.of(typ, brand, s)
+        key = (acc, brand, typ, s.prefix + s.design_no, f if split else "", size)
         d = designs.get(key)
         if d is None:
             d = designs[key] = Design(account=acc, brand=brand, typ=typ, design=s.prefix + s.design_no,
-                                      digits=s.design_no, split=split, feature=f if split else "")
+                                      digits=s.design_no, split=split, feature=f if split else "", size=size)
         d.skus.append(s)
         d.features[f] += 1
     out = list(designs.values())

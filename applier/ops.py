@@ -81,6 +81,9 @@ def dry_run(plan: Plan, live: dict[tuple[str, str], dict], aspects: dict,
     ids = brand_ids(live) if brand_map else {}
     okcur = allowed_current(brand_map) if brand_map else set()
     fixes: dict[tuple[str, str], str] = {}        # (account, offer) -> новое «Название цвета» из предложений плана
+    for c in plan.checks.colors:                  # единое значение на дизайн; правки близнецов ниже перекрывают его
+        for offer in c["offers"]:
+            fixes[(c["account"], offer)] = c["value"]
     for t in plan.checks.twins:
         for p in t["proposals"]:
             for offer in p["offers"]:

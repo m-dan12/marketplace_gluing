@@ -212,3 +212,49 @@ def test_twins_inside_one_design_get_proposals_per_sku():
     aspects = {cat: {10097: "Название цвета", 6771: "Размер простыни"}}
     tw = twins_check([g], attrs, aspects, {10097: "Название цвета", 6771: "Размер простыни"})
     assert tw[0]["same_design"] and [(p["offers"], p["new_value"]) for p in tw[0]["proposals"]] == [(["b"], "Сердечки 2"), (["c"], "Сердечки 3")]
+
+
+def _kit(code, offers, orders=0):
+    from gluing.ozon.model import Design, OzonSku
+    skus = [OzonSku(offer_id=o, title="", category="", stock=5, orders28=orders, prefix="PT", design_no=code[2:], key="1", key_nums=())
+            for o in offers]
+    return Design(account="skazka", brand="Сказка", typ="Комплект", design=code, digits=code[2:], skus=skus)
+
+
+def test_unify_colors_takes_the_most_common_value_and_fills_empty():
+    from gluing.ozon.model import OGroup
+    from planner.plan import unify_colors, with_colors
+    g = OGroup(key="k", account="skazka", brand="Сказка", typ="Комплект", leaf="Обычные", idx=1, kind="склейка",
+               designs=[_kit("PT1", ["a", "b", "c"]), _kit("PT2", ["d", "e"]), _kit("PT3", ["f", "g"])])
+    cat = (1, 2)
+    mk = lambda c: {"cat": cat, "name": "", "attrs": {"10097": [c]} if c else {}}
+    attrs = {("skazka", o): mk(c) for o, c in zip("abcdefg", ["Classic", "Классика", "Classic", "Роза", "Роза", "", ""])}
+    aspects = {cat: {10097: "Название цвета"}}
+    rec, fixes = unify_colors([g], attrs, aspects)
+    assert [(r["design"], r["value"], r["offers"]) for r in rec] == [("PT1", "Classic", {"b": "Классика"})]   # PT3 без значений не трогаем
+    assert fixes == {("skazka", "b"): "Classic"}
+    assert with_colors(attrs, fixes)[("skazka", "b")]["attrs"]["10097"] == ["Classic"]
+    assert attrs[("skazka", "b")]["attrs"]["10097"] == ["Классика"]               # исходный снимок цел
+
+
+def test_unify_colors_skips_categories_without_color_aspect():
+    from gluing.ozon.model import OGroup
+    from planner.plan import unify_colors
+    g = OGroup(key="k", account="skazka", brand="Сказка", typ="Комплект", leaf="Обычные", idx=1, kind="склейка",
+               designs=[_kit("PT1", ["a", "b"])])
+    attrs = {("skazka", "a"): {"cat": (1, 2), "name": "", "attrs": {"10097": ["X"]}},
+             ("skazka", "b"): {"cat": (1, 2), "name": "", "attrs": {"10097": ["Y"]}}}
+    assert unify_colors([g], attrs, {(1, 2): {6771: "Размер"}}) == ([], {})
+
+
+def test_twin_rename_covers_the_whole_design_not_only_clashing_offers():
+    from gluing.ozon.model import OGroup
+    from planner.plan import twins_check
+    g = OGroup(key="k", account="skazka", brand="Сказка", typ="Комплект", leaf="Обычные", idx=1, kind="склейка",
+               designs=[_kit("PT1", ["a"]), _kit("PT2", ["b", "c"])])
+    cat = (1, 2)
+    mk = lambda size: {"cat": cat, "name": "", "attrs": {"10097": ["Бисер"], "6771": [size]}}
+    attrs = {("skazka", "a"): mk("160x200"), ("skazka", "b"): mk("160x200"), ("skazka", "c"): mk("180x200")}   # c не близнец, но того же дизайна
+    aspects = {cat: {10097: "Название цвета", 6771: "Размер простыни"}}
+    tw = twins_check([g], attrs, aspects, {10097: "Название цвета", 6771: "Размер простыни"})
+    assert tw[0]["proposals"][0]["offers"] == ["b", "c"] and tw[0]["proposals"][0]["new_value"] == "Бисер 2"

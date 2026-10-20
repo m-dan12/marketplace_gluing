@@ -148,3 +148,18 @@ def test_case_difference_is_not_a_change_and_brand_off_without_map():
     assert not [o for o in r.ops if o.op_type == "set_brand"]
     r = dry_run(plan([group("g_1", ["a"], 1)]), live, ASP)
     assert not [o for o in r.ops if o.op_type == "set_brand"]
+
+
+def test_unified_design_color_becomes_set_color_name_and_twin_fix_overrides_it():
+    g = group("g_1", ["a", "b", "c"], 1)
+    live = {("skazka", "a"): live_item("Classic", size="1"), ("skazka", "b"): live_item("Классика", size="2"),
+            ("skazka", "c"): live_item("Classic", size="3")}
+    p = plan([g])
+    p.checks.colors = [{"account": "skazka", "design": "PT0", "value": "Classic", "offers": {"b": "Классика"}}]
+    r = dry_run(p, live, ASP)
+    assert not r.blocked
+    assert {(o.offer_id, o.to_value) for o in r.ops if o.op_type == "set_color_name"} == {("b", "Classic")}
+    # правка близнеца того же артикула перекрывает единое значение
+    p.checks.twins = [{"group_id": "g_1", "proposals": [{"design": "PT0", "offers": ["b"], "attr": "Название цвета", "new_value": "Classic 2"}]}]
+    r2 = dry_run(p, live, ASP)
+    assert {(o.offer_id, o.to_value) for o in r2.ops if o.op_type == "set_color_name"} == {("b", "Classic 2")}

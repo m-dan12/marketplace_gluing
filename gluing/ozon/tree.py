@@ -112,9 +112,9 @@ def _merge_same_design(ds: list[Design]) -> tuple[list[Design], dict[int, list[s
     """Части одного дизайна, попавшие в одну ветку, считаются одним дизайном.
 
     Возвращает (дизайны, {id(дизайна): uid исходных частей}) — по uid ведётся состояние «липкого» назначения."""
-    by: dict[str, list[Design]] = {}
+    by: dict[tuple[str, str], list[Design]] = {}
     for d in ds:
-        by.setdefault(d.design, []).append(d)
+        by.setdefault((d.design, d.size), []).append(d)
     out: list[Design] = []
     uids: dict[int, list[str]] = {}
     for parts in by.values():
@@ -124,7 +124,7 @@ def _merge_same_design(ds: list[Design]) -> tuple[list[Design], dict[int, list[s
             f = parts[0]
             m = Design(account=f.account, brand=f.brand, typ=f.typ, design=f.design, digits=f.digits,
                        skus=[s for p in parts for s in p.skus], features=sum((p.features for p in parts), Counter()),
-                       feature=f.feature, split=f.split,
+                       feature=f.feature, split=f.split, size=f.size,
                        sigs=frozenset().union(*(p.sigs for p in parts)))
         out.append(m)
         uids[id(m)] = [p.uid for p in parts]
@@ -141,6 +141,7 @@ def build(designs: list[Design], profile: dict, prev: dict | None = None):
     prev_dec = (prev or {}).get("decisions", {})
     prev_asg = (prev or {}).get("assign", {})
     eco, child = eco_designs(), child_designs()
+    hard_types = set(profile.get("hard_split", {}).get("types", []))     # детские и эко не смешиваются с обычными ни при каком пороге
     decisions: dict[str, bool] = {}
     log: list[dict] = []
     groups: list[OGroup] = []
@@ -230,9 +231,10 @@ def build(designs: list[Design], profile: dict, prev: dict | None = None):
                 continue
             leaves = []
             rest2 = bds
+            hard = typ in hard_types
             kids = [d for d in rest2 if _in(d, child)]
             others = [d for d in rest2 if d not in kids]
-            if kids and want(f"{node}|{bname}|детские", len(kids)) and (len(others) >= mn or not others):
+            if kids and (hard or (want(f"{node}|{bname}|детские", len(kids)) and (len(others) >= mn or not others))):
                 note(node, f"детские в «{bname}»", "", len(kids), "отделены")
                 leaves.append((f"{bname} › Детские", kids))
                 rest2 = others
@@ -240,7 +242,7 @@ def build(designs: list[Design], profile: dict, prev: dict | None = None):
                 note(node, f"детские в «{bname}»", "", len(kids), "остались в ветке")
             ecos = [d for d in rest2 if _in(d, eco)]
             others = [d for d in rest2 if d not in ecos]
-            if ecos and want(f"{node}|{bname}|эко", len(ecos)) and (len(others) >= mn or not others):
+            if ecos and (hard or (want(f"{node}|{bname}|эко", len(ecos)) and (len(others) >= mn or not others))):
                 note(node, f"эко в «{bname}»", "", len(ecos), "отделены")
                 leaves.append((f"{bname} › Эко", ecos))
                 rest2 = others
@@ -249,7 +251,15 @@ def build(designs: list[Design], profile: dict, prev: dict | None = None):
             if rest2:
                 leaves.append((bname, rest2))
             for leaf, lds in leaves:
-                finalize(acc, brand, typ, leaf, lds)
+                by_size: dict[str, list[Design]] = defaultdict(list)
+                for d in lds:
+                    by_size[d.size].append(d)
+                if len(by_size) > 1 or "" not in by_size:     # КПБ: у каждой размерности своя склейка
+                    for sz in sorted(by_size):
+                        note(node, f"размерность в «{leaf}»", sz, len(by_size[sz]), "отдельная склейка")
+                        finalize(acc, brand, typ, f"{leaf} › {sz}", by_size[sz])
+                else:
+                    finalize(acc, brand, typ, leaf, lds)
 
     state = {"decisions": decisions, "assign": assign}
     return groups, log, state

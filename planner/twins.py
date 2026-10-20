@@ -30,6 +30,9 @@ def load_attrs(conn) -> dict[tuple[str, str], dict]:
                 for a, o, c, t, n, at, pid, bid in cur.fetchall()}
 
 
+COLOR_NAME_ATTR = 10097         # «Название цвета»
+
+
 def signature(info: dict, aspects: dict[tuple[int, int], dict[int, str]]) -> tuple:
     asp = aspects.get(info["cat"], {})
     return tuple((aid, tuple(info["attrs"].get(str(aid), []))) for aid in sorted(asp))

@@ -37,7 +37,7 @@ def quality(groups: list[OGroup]) -> dict:
     where = defaultdict(set)
     for g in glued:
         for d in g.designs:
-            where[(d.account, d.brand, d.typ, d.design)].add(g.key.rsplit("#", 1)[0] + "#" + str(g.idx))
+            where[(d.account, d.brand, d.typ, d.design, d.size)].add(g.key.rsplit("#", 1)[0] + "#" + str(g.idx))
     return {
         "дизайнов": n_designs,
         "дизайнов, разделённых между склейками": sum(1 for v in where.values() if len(v) > 1),

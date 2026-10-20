@@ -3,11 +3,13 @@ from __future__ import annotations
 
 import hashlib
 import json
+from collections import Counter
 from datetime import datetime, timezone
 
 from contract import Check, Decision, Design, Group, Member, Plan, RunInfo
 from gluing.ozon.model import OGroup
 from planner.ids import assign_ids
+from planner.twins import COLOR_NAME_ATTR
 
 KIND = {"склейка": "glue", "малая": "small_glue", "один дизайн": "single_design", "одиночка": "unglued"}
 
@@ -32,12 +34,66 @@ def check_groups(groups: list[Group], profile: dict) -> Check:
     return Check(hard_violations=hard, warnings=warn)
 
 
+def _color_of(attrs: dict, key: tuple[str, str]) -> str:
+    return ((attrs.get(key) or {}).get("attrs", {}).get(str(COLOR_NAME_ATTR)) or [""])[0]
+
+
+def with_colors(attrs: dict, fixes: dict[tuple[str, str], str]) -> dict:
+    """Копия снимка атрибутов с подставленными значениями «Названия цвета» (исходный снимок не меняется)."""
+    out = dict(attrs)
+    for key, value in fixes.items():
+        if key in out:
+            out[key] = {**out[key], "attrs": {**out[key]["attrs"], str(COLOR_NAME_ATTR): [value]}}
+    return out
+
+
+def unify_colors(groups: list[OGroup], attrs: dict, aspects: dict) -> tuple[list[dict], dict[tuple[str, str], str]]:
+    """Одно «Название цвета» на дизайн: иначе Озон показывает его артикулы в склейке соседними иконками.
+
+    Берётся самое частое значение среди артикулов дизайна (вес: заказы за 28 дней + 1), при равенстве — по алфавиту. Пустые
+    значения заполняются. Только для категорий, где «Название цвета» есть среди вариативных характеристик; дизайн без единого
+    значения не трогаем (выдумывать название нельзя). -> (записи для плана, {(кабинет, артикул): новое значение})."""
+    by_design: dict[tuple[str, str], list] = {}
+    for g in groups:
+        for d in g.designs:
+            by_design.setdefault((g.account, d.design), []).extend(d.skus)
+    fixes: dict[tuple[str, str], str] = {}
+    records: list[dict] = []
+    for (acc, design), skus in sorted(by_design.items()):
+        skus = [s for s in skus if (acc, s.offer_id) in attrs and COLOR_NAME_ATTR in aspects.get(attrs[(acc, s.offer_id)]["cat"], {})]
+        if len(skus) < 2:
+            continue
+        weight: Counter = Counter()
+        for s in skus:
+            v = _color_of(attrs, (acc, s.offer_id))
+            if v:
+                weight[v] += s.orders28 + 1
+        if not weight:
+            continue
+        best = max(weight.values())
+        value = min(v for v, w in weight.items() if w == best)
+        changed = {s.offer_id: _color_of(attrs, (acc, s.offer_id)) for s in skus if _color_of(attrs, (acc, s.offer_id)) != value}
+        if changed:
+            records.append({"account": acc, "design": design, "value": value, "offers": changed})
+            for o in changed:
+                fixes[(acc, o)] = value
+    return records, fixes
+
+
 def twins_check(groups: list[OGroup], attrs: dict, aspects: dict, names: dict[int, str] | None = None) -> list[dict]:
     """Близнецы в итоговых группах + предложение правки «Названия цвета» (человек подтверждает, на площадку не пишем)."""
     from planner.twins import find_twins
     names = names or {}
     keys = {g.key: [(g.account, s.offer_id) for d in g.designs for s in d.skus] for g in groups if g.kind != "одиночка"}
     design_of = {(g.account, s.offer_id): d.design for g in groups for d in g.designs for s in d.skus}
+    offers_of: dict[tuple[str, str], list[str]] = {}
+    for g in groups:
+        for d in g.designs:
+            offers_of.setdefault((g.account, d.design), []).extend(s.offer_id for s in d.skus)
+
+    def whole_design(acc: str, design: str, twinned: list[str]) -> list[str]:
+        """Близнецы переименовываются дизайном целиком (все артикулы дизайна), иначе значения цвета внутри дизайна разойдутся."""
+        return sorted(set(offers_of.get((acc, design), [])) | set(twinned))
     out = []
     for t in find_twins(keys, attrs, aspects):
         acc = next(g.account for g in groups if g.key == t["group_id"])
@@ -52,7 +108,7 @@ def twins_check(groups: list[OGroup], attrs: dict, aspects: dict, names: dict[in
         props, n = [], 1
         from planner.twins import distinguishing_value
         # внутри одного дизайна (два артикула с одинаковыми вариантами) правим каждый артикул, кроме первого
-        units = [(d, by_design[d]) for d in designs[1:]] if len(designs) > 1 else                 [(designs[0], [o]) for o in sorted(by_design[designs[0]])[1:]]
+        units = [(d, whole_design(acc, d, by_design[d])) for d in designs[1:]] if len(designs) > 1 else             [(designs[0], [o]) for o in sorted(by_design[designs[0]])[1:]]
         first = by_design[designs[0]] if len(designs) > 1 else sorted(by_design[designs[0]])[:1]
         for d, offs in units:
             tail, source = distinguishing_value(acc, first, offs, attrs, aspects, names)
@@ -72,7 +128,11 @@ def twins_check(groups: list[OGroup], attrs: dict, aspects: dict, names: dict[in
 def _with_twins(check: Check, groups, attrs, aspects, names, ids) -> Check:
     if attrs is None or aspects is None:
         return check
-    tw = twins_check(groups, attrs, aspects, names)
+    colors, fixes = unify_colors(groups, attrs, aspects)
+    check.colors = colors
+    if colors:
+        check.warnings.append(f"единое название цвета: {len(colors)} дизайнов, {len(fixes)} артикулов")
+    tw = twins_check(groups, with_colors(attrs, fixes), aspects, names)
     for t in tw:
         t["group_id"] = ids.get(t["group_key"], t["group_key"])
     check.twins = tw

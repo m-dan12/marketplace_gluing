@@ -36,11 +36,13 @@ class Design:
     demand: float | None = None                   # прогноз спроса (если посчитан); иначе сила = заказы за 28 дней
     sigs: frozenset = field(default_factory=frozenset, compare=False)   # подписи вариантов SKU (для поиска близнецов)
     split: bool = False                           # дизайн разделён по признаку: единица = (дизайн, признак)
+    size: str = ""                                # размерность (КПБ): единица = (дизайн, размерность); пусто — все размеры вместе
 
     @property
     def uid(self) -> str:
         base = f"{self.account}|{self.brand}|{self.typ}|{self.design}"
-        return f"{base}|{self.feature}" if self.split else base
+        base = f"{base}|{self.feature}" if self.split else base
+        return f"{base}|{self.size}" if self.size else base
 
     @property
     def orders(self) -> int:

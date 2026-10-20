@@ -13,7 +13,10 @@ ROOT = Path(__file__).resolve().parent.parent
 ACTUAL = tomllib.load(open(ROOT / "profiles" / "ozon.toml", "rb"))
 # механика порогов и запасных веток проверяется при старых порогах 10/8 для всех веток; правило «признак отделяется всегда» отдельно (ACTUAL)
 LOW_FEATURES = {**ACTUAL, "features": {"split_design": True, "split_up": 2, "merge_down": 1}}   # вариант: малые признаки отделяются от 2 дизайнов
-PROFILE = {**ACTUAL, "features": {k: v for k, v in ACTUAL["features"].items() if k not in ("split_up", "merge_down")}}
+# механика дерева проверяется без деления КПБ по размерности и без жёсткого отделения эко/детских (они отдельно: SIZED)
+PROFILE = {**{k: v for k, v in ACTUAL.items() if k not in ("sizes", "hard_split")},
+           "features": {k: v for k, v in ACTUAL["features"].items() if k not in ("split_up", "merge_down")}}
+SIZED = {**PROFILE, "sizes": ACTUAL["sizes"], "hard_split": ACTUAL["hard_split"]}
 
 SET = "Постельное белье > Комплект постельного белья"
 PIL = "Постельное белье > Наволочка"
@@ -418,3 +421,65 @@ def test_no_grace_by_default():
     prof = {k: v for k, v in PROFILE.items() if k != "stock"}
     ds, _ = build_designs([stock_sku("PT1/4-13-26/1", 0, 1)], ["skazka"], prof)
     assert ds == []
+
+
+# ---------- КПБ: размерность, эко и детские ----------
+def run_sized(skus, acc="skazka", prev=None):
+    ds, unknown = build_designs(skus, [acc] * len(skus), SIZED)
+    assert unknown == []
+    return build(ds, SIZED, prev)
+
+
+def _plain(n, start=70000, key="4-13-26", pref="PT"):
+    from gluing.lists import child_designs, eco_designs
+    bad = eco_designs() | child_designs()
+    out, i = [], 0
+    while len(out) < n:
+        if str(start + i) not in bad:
+            out.append(sku(f"{pref}{start + i}/{key}/1"))
+        i += 1
+    return out
+
+
+def test_kpb_group_has_one_size_and_design_is_split_between_sizes():
+    a, b = _plain(8, 70000, "4-13-26"), _plain(8, 70100, "5-13-26")
+    both = [sku("PT70000/5-13-26/1")]                      # тот же дизайн, что в a[0], но размер 2-сп
+    groups, log, _ = run_sized(a + b + both)
+    for g in groups:
+        sizes = {sk.key.split("-")[0] for d in g.designs for sk in d.skus}
+        assert len(sizes) == 1, (g.leaf, sizes)
+    leaves = sorted({g.leaf for g in groups})
+    assert leaves == ["Обычные › 1,5-сп", "Обычные › 2-сп"]
+    assert sum(1 for g in groups for d in g.designs if d.design == "PT70000") == 2
+    uids = [d.uid for g in groups for d in g.designs]
+    assert len(uids) == len(set(uids))
+
+
+def test_kpb_size_by_two_digit_key_and_unknown_lead():
+    groups, _, _ = run_sized(_plain(6, 70000, "42-0-0") + _plain(6, 70100, "4-13-26") + _plain(6, 70200, "7-13-26"))
+    assert {g.leaf for g in groups} == {"Обычные › 1,5-сп", "Обычные › размер 7"}
+
+
+def test_kpb_mix_brands_keep_all_sizes_together():
+    sk = _plain(7, 70000, "4-13-26", "MT") + _plain(7, 70000, "5-13-26", "MT")
+    groups, _, _ = run_sized(sk)
+    assert len(groups) == 1 and groups[0].leaf == "Обычные" and len(groups[0].designs) == 7
+
+
+def test_other_bed_types_are_not_split_by_size():
+    sk = n_designs(8, PIL, 70000, "0-0-26") + n_designs(8, PIL, 70100, "4-0-26")
+    groups, _, _ = run_sized(sk)
+    assert all("›" not in g.leaf for g in groups)
+
+
+def test_kpb_eco_and_kids_always_separate_even_when_few():
+    from gluing.lists import child_designs, eco_designs
+    ecos = sorted(d for d in eco_designs() if len(d) == 4)[:3]
+    kids = sorted(d for d in child_designs() if len(d) <= 4 and d not in eco_designs())[:2]
+    sk = _plain(12) + [sku(f"PT{e}/4-13-26/1") for e in ecos] + [sku(f"PT{k}/4-13-26/1") for k in kids]
+    groups, log, _ = run_sized(sk)
+    by = {g.leaf: len(g.designs) for g in groups}
+    assert by == {"Обычные › 1,5-сп": 12, "Обычные › Эко › 1,5-сп": 3, "Обычные › Детские › 1,5-сп": 2}, by
+    # без жёсткого правила (прежняя механика) те же дизайны остались бы в одной ветке
+    groups_old, _, _ = run(sk)
+    assert len({g.leaf for g in groups_old}) == 1
