@@ -46,7 +46,6 @@ def dry_run_wb(plan: Plan, live: dict[tuple[str, int], int], max_size: int = HAR
     for (acc, imt), nms in residents.items():
         out.sizes.setdefault(acc, {})[imt] = len(nms)
     planned = {(g.account, nm_of(m)) for g in plan.groups for d in g.designs for m in d.members if nm_of(m) is not None}
-    group_of = {(g.account, nm_of(m)): g.group_id for g in plan.groups for d in g.designs for m in d.members}
     for g in plan.groups:
         members = [(m.offer_id, nm_of(m)) for d in g.designs for m in d.members]
         out.members += len(members)

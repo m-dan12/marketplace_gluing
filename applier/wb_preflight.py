@@ -22,7 +22,6 @@ def evaluate_wb(plan: Plan, res: WbDryRun, status: str | None, snapshots: dict[s
     ck = plan.checks
     members = [(g.account, nm_of(m), m.offer_id, g.group_id) for g in plan.groups for d in g.designs for m in d.members]
     in_plan = {(a, o) for a, _, o, _ in members}
-    group_by_id = {g.group_id: g for g in plan.groups}
 
     r.add(OK if status == "draft" else STOP, "статус плана", f"{status}" + ("" if status == "draft" else " (применять можно только черновик)"))
     r.add(OK if plan.run.platform == "wb" else STOP, "площадка плана", plan.run.platform)

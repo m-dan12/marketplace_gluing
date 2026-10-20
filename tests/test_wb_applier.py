@@ -1,4 +1,3 @@
-import pytest
 
 from applier.executor import MemoryJournal
 from applier.wb_executor import WbSettings, execute_wb, rollback_wb

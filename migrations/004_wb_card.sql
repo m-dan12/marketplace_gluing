@@ -8,6 +8,7 @@ create table if not exists gluing.wb_card (
     subject     text,
     brand       text,
     title       text,
+    color       text,                    -- характеристика «Цвет» (для проверки дублей цвета в склейке)
     fetched_at  timestamptz not null default now(),
     primary key (account, nm_id)
 );
