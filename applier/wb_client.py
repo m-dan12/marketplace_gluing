@@ -57,8 +57,25 @@ def api_for(account: str, env: dict[str, str], merge_env: dict[str, str] | None 
     return WbApi(env[rk], (merge_env or {}).get(mk))
 
 
+ROOT = Path(__file__).resolve().parent.parent
+
+
+def conf(name: str, explicit: str = "") -> str:
+    """Параметр, затем переменная окружения, затем .env проекта."""
+    if explicit:
+        return explicit
+    if os.environ.get(name):
+        return os.environ[name]
+    env = ROOT / ".env"
+    if env.exists():
+        for line in env.read_text(encoding="utf-8").splitlines():
+            if line.startswith(name + "="):
+                return line.split("=", 1)[1].strip()
+    return ""
+
+
 def merge_env_path(explicit: str = "") -> Path | None:
-    p = explicit or os.environ.get("MARKETPLACE_MERGE_ENV", "")
+    p = conf("MARKETPLACE_MERGE_ENV", explicit)
     return Path(p) if p else None
 
 
@@ -101,8 +118,8 @@ class WbPort:
 
 
 def read_env_files(env: str, merge: str = "") -> tuple[dict[str, str], dict[str, str]]:
-    p = env or os.environ.get("MARKETPLACE_ENV", "")
+    p = conf("MARKETPLACE_ENV", env)
     if not p:
-        raise SystemExit("не указан .env с ключами: параметр --env или переменная MARKETPLACE_ENV")
+        raise SystemExit("не указан .env с ключами: параметр --env или MARKETPLACE_ENV (окружение или .env проекта)")
     m = merge_env_path(merge)
     return read_env(p), (read_env(m) if m else {})
