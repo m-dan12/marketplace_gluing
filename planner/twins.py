@@ -20,9 +20,9 @@ def load_aspects(conn) -> dict[tuple[int, int], dict[int, str]]:
 def load_attrs(conn) -> dict[tuple[str, str], dict]:
     """(account, offer_id) -> {category_id, type_id, name, attrs}."""
     with conn.cursor() as cur:
-        cur.execute("select account, offer_id, category_id, type_id, name, attrs, product_id from gluing.sku_attr")
-        return {(a, o): {"cat": (c, t), "name": n, "attrs": at, "product_id": pid}
-                for a, o, c, t, n, at, pid in cur.fetchall()}
+        cur.execute("select account, offer_id, category_id, type_id, name, attrs, product_id, brand_id from gluing.sku_attr")
+        return {(a, o): {"cat": (c, t), "name": n, "attrs": at, "product_id": pid, "brand_id": bid}
+                for a, o, c, t, n, at, pid, bid in cur.fetchall()}
 
 
 def signature(info: dict, aspects: dict[tuple[int, int], dict[int, str]]) -> tuple:

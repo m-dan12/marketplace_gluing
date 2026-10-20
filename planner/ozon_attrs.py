@@ -72,6 +72,16 @@ def flatten(item: dict) -> dict[str, list[str]]:
     return attrs
 
 
+def brand_id_of(item: dict) -> int | None:
+    """dictionary_value_id бренда (атрибут 85) из карточки; None, если бренд не задан."""
+    for a in item.get("attributes") or []:
+        if a.get("id") == 85:
+            for v in a.get("values") or []:
+                if v.get("dictionary_value_id"):
+                    return int(v["dictionary_value_id"])
+    return None
+
+
 def run(conn, env_path: str, limit: int | None, dry: bool) -> dict:
     env = read_env(env_path)
     with conn.cursor() as cur:
@@ -100,12 +110,12 @@ def run(conn, env_path: str, limit: int | None, dry: bool) -> dict:
                 continue
             with conn.transaction(), conn.cursor() as cur:
                 cur.executemany(
-                    "insert into gluing.sku_attr(account,offer_id,product_id,category_id,type_id,name,attrs,fetched_at)"
-                    " values (%s,%s,%s,%s,%s,%s,%s, now()) on conflict (account,offer_id) do update set"
+                    "insert into gluing.sku_attr(account,offer_id,product_id,category_id,type_id,name,attrs,brand_id,fetched_at)"
+                    " values (%s,%s,%s,%s,%s,%s,%s,%s, now()) on conflict (account,offer_id) do update set"
                     " product_id=excluded.product_id, category_id=excluded.category_id, type_id=excluded.type_id,"
-                    " name=excluded.name, attrs=excluded.attrs, fetched_at=now()",
+                    " name=excluded.name, attrs=excluded.attrs, brand_id=excluded.brand_id, fetched_at=now()",
                     [(acc, it["offer_id"], it.get("id"), it.get("description_category_id"), it.get("type_id"),
-                      it.get("name"), json.dumps(flatten(it), ensure_ascii=False)) for it in items])
+                      it.get("name"), json.dumps(flatten(it), ensure_ascii=False), brand_id_of(it)) for it in items])
     stats["categories"] = len(cats)
     if not dry:
         with conn.transaction(), conn.cursor() as cur:

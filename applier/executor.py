@@ -12,7 +12,7 @@ from collections import Counter
 from dataclasses import dataclass
 from typing import Callable, Protocol
 
-from applier.ops import COLOR_NAME_ATTR, MODEL_NAME_ATTR, Op
+from applier.ops import BRAND_ATTR, COLOR_NAME_ATTR, MODEL_NAME_ATTR, Op
 
 BATCH = 100
 DONE_STATUSES = ("imported", "failed", "skipped")
@@ -38,7 +38,7 @@ class MemoryJournal:
             i = len(self.data) + 1
             self.data[i] = {"op_id": i, "run_id": run_id, "account": o.account, "offer_id": o.offer_id,
                             "op_type": o.op_type, "attr_id": o.attr_id, "from_value": o.from_value,
-                            "to_value": o.to_value, "status": "pending", "error": ""}
+                            "to_value": o.to_value, "from_id": o.from_id, "to_id": o.to_id, "status": "pending", "error": ""}
             ids.append(i)
         return ids
 
@@ -52,7 +52,8 @@ class MemoryJournal:
 class PgJournal:
     """Журнал в gluing.op. attr_id выводится из op_type, поэтому отдельной колонки не нужно."""
 
-    ATTR = {"set_model_name": MODEL_NAME_ATTR, "set_color_name": COLOR_NAME_ATTR, "unglue_model": MODEL_NAME_ATTR}
+    ATTR = {"set_model_name": MODEL_NAME_ATTR, "set_color_name": COLOR_NAME_ATTR, "unglue_model": MODEL_NAME_ATTR,
+            "set_brand": BRAND_ATTR}
 
     def __init__(self, conn):
         self.conn = conn
@@ -61,8 +62,9 @@ class PgJournal:
         ids = []
         with self.conn.transaction(), self.conn.cursor() as cur:
             for o in ops:
-                cur.execute("insert into gluing.op(run_id,account,offer_id,op_type,from_value,to_value) values (%s,%s,%s,%s,%s,%s)"
-                            " returning op_id", (run_id, o.account, o.offer_id, o.op_type, o.from_value, o.to_value))
+                cur.execute("insert into gluing.op(run_id,account,offer_id,op_type,from_value,to_value,from_id,to_id)"
+                            " values (%s,%s,%s,%s,%s,%s,%s,%s) returning op_id",
+                            (run_id, o.account, o.offer_id, o.op_type, o.from_value, o.to_value, o.from_id, o.to_id))
                 ids.append(cur.fetchone()[0])
         return ids
 
@@ -73,14 +75,14 @@ class PgJournal:
                         (status, error, status, op_id))
 
     def rows(self, run_id, status=None):
-        q, args = ("select op_id,run_id,account,offer_id,op_type,from_value,to_value,status,coalesce(error,'')"
+        q, args = ("select op_id,run_id,account,offer_id,op_type,from_value,to_value,status,coalesce(error,''),from_id,to_id"
                    " from gluing.op where run_id=%s"), [run_id]
         if status:
             q += " and status=%s"
             args.append(status)
         with self.conn.cursor() as cur:
             cur.execute(q + " order by op_id", args)
-            cols = ["op_id", "run_id", "account", "offer_id", "op_type", "from_value", "to_value", "status", "error"]
+            cols = ["op_id", "run_id", "account", "offer_id", "op_type", "from_value", "to_value", "status", "error", "from_id", "to_id"]
             out = [dict(zip(cols, r)) for r in cur.fetchall()]
         for r in out:
             r["attr_id"] = self.ATTR.get(r["op_type"], 0)
@@ -119,9 +121,14 @@ class Settings:
     sleep: Callable = time.sleep
 
 
+def _value(o: dict) -> dict:
+    """Значение атрибута для записи: у справочных атрибутов (бренд) обязательно dictionary_value_id, у текстовых только value."""
+    return {"dictionary_value_id": o["to_id"], "value": o["to_value"]} if o.get("to_id") else {"value": o["to_value"]}
+
+
 def _write_batch(api: Api, ops: list[dict], attr_id: int, st: Settings) -> dict[str, dict]:
     d = api.post("/v1/product/attributes/update", {"items": [
-        {"offer_id": o["offer_id"], "attributes": [{"complex_id": 0, "id": attr_id, "values": [{"value": o["to_value"]}]}]}
+        {"offer_id": o["offer_id"], "attributes": [{"complex_id": 0, "id": attr_id, "values": [_value(o)]}]}
         for o in ops]})
     tid = d.get("task_id")
     return wait_task(api, tid, len(ops), st.sleep) if tid else {}
@@ -167,13 +174,14 @@ def _apply_group(api: Api, rows: list[dict], attr_id: int, journal: Journal, st:
 
 
 def execute(run_id: str, ops: list[Op], apis: dict[str, Api], journal: Journal, st: Settings | None = None) -> dict:
-    """Применяет операции. Сначала правки цвета (чтобы убрать близнецов), потом названия моделей, потом снятие с модели."""
+    """Применяет операции. Сначала бренд (склеивать можно только карточки одного бренда), затем правки цвета (чтобы убрать
+    близнецов), потом названия моделей, потом снятие с модели."""
     st = st or Settings()
     if len(ops) > st.max_ops:
         return {"stopped": "max_ops", "ops": len(ops), "limit": st.max_ops}
     ids = journal.add(run_id, ops)
     rows = [r for r in journal.rows(run_id) if r["op_id"] in set(ids)]
-    order = {"set_color_name": 0, "set_model_name": 1, "unglue_model": 2}
+    order = {"set_brand": 0, "set_color_name": 1, "set_model_name": 2, "unglue_model": 3}
     rows.sort(key=lambda r: (order[r["op_type"]], r["account"], r["op_id"]))
     summary: Counter = Counter()
     if st.probe and rows:                                              # проба: пока одна операция не применится, дальше не идём
@@ -205,8 +213,12 @@ def rollback(run_id: str, apis: dict[str, Api], journal: Journal, st: Settings |
     """Возвращает прежние значения у применённых операций. Операции, где «было» пусто, откатить нельзя (очистить вручную)."""
     st = st or Settings()
     done = journal.rows(run_id, "done")
-    manual = [r for r in done if r["from_value"] == ""]
-    todo = [{**r, "from_value": r["to_value"], "to_value": r["from_value"]} for r in reversed(done) if r["from_value"] != ""]
+    def revertible(r: dict) -> bool:               # пустое «было» вернуть нельзя; бренд без id справочника тоже
+        return r["from_value"] != "" and not (r["op_type"] == "set_brand" and not r.get("from_id"))
+
+    manual = [r for r in done if not revertible(r)]
+    todo = [{**r, "from_value": r["to_value"], "to_value": r["from_value"], "from_id": r.get("to_id"), "to_id": r.get("from_id")}
+            for r in reversed(done) if revertible(r)]
     summary: Counter = Counter()
     groups: dict[tuple, list[dict]] = {}
     for r in todo:

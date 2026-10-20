@@ -14,14 +14,16 @@ from __future__ import annotations
 
 import argparse
 import json
+import tomllib
 from dataclasses import asdict
 
 import psycopg
 
+from applier.brands import load_brand_map
 from applier.executor import PgJournal, Settings, execute, rollback
 from applier.ops import dry_run, select_ops
 from applier.ozon_client import api_for, env_path, read_env
-from plan_ozon import database_url
+from plan_ozon import ROOT, database_url
 from planner.store import PgStore
 from planner.twins import load_aspects, load_attrs
 
@@ -35,18 +37,19 @@ def show(res) -> None:
         print("  предупреждение:", w[:200])
 
 
-def check_plan(conn, plan):
+def check_plan(conn, plan, brand_map: dict | None = None):
     """Сравнение плана с живыми атрибутами и остатками (только чтение БД): список операций, блокировки, предупреждения."""
     with conn.cursor() as cur:
         cur.execute("select account, offer_id, sum(present) from ozon_stocks where snapshot_date=(select max(snapshot_date) from ozon_stocks) group by 1,2")
         stock = {(a_, o_): int(s_ or 0) for a_, o_, s_ in cur.fetchall()}
-    res = dry_run(plan, load_attrs(conn), load_aspects(conn), stock)
+    res = dry_run(plan, load_attrs(conn), load_aspects(conn), stock, brand_map=brand_map)
     conn.rollback()
     return res
 
 
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("--profile", default=str(ROOT / "profiles" / "ozon.toml"), help="профиль (таблица брендов [ozon_brand])")
     ap.add_argument("--run", default="", help="run_id плана; по умолчанию последний план Озона")
     ap.add_argument("--refresh", action="store_true", help="перечитать атрибуты с Озона (чтение) перед проверкой")
     ap.add_argument("--env", default="", help=".env с ключами Озона (или MARKETPLACE_ENV)")
@@ -58,10 +61,12 @@ def main() -> None:
     ap.add_argument("--rollback", default="", help="run_id, чьи применённые операции нужно откатить (вместе с --execute)")
     ap.add_argument("--accounts", default="", help="через запятую: skazka,timeless,milky_garden (по умолчанию все)")
     ap.add_argument("--types", default="", help="только эти типы товара, через запятую (снятия unglue_model по типу не фильтруются и отбрасываются)")
-    ap.add_argument("--only", default="", help="только эти виды операций: set_color_name, set_model_name, unglue_model")
+    ap.add_argument("--only", default="", help="только эти виды операций: set_brand, set_color_name, set_model_name, unglue_model")
     ap.add_argument("--max-ops", type=int, default=1500, help="предохранитель: больше операций за запуск не применять")
     ap.add_argument("--no-probe", dest="probe", action="store_false", help="не делать пробную запись одной операции")
     a = ap.parse_args()
+    with open(a.profile, "rb") as f:
+        profile = tomllib.load(f)
 
     with psycopg.connect(database_url(), autocommit=True) as conn:       # каждая запись журнала фиксируется сразу
         store = PgStore(conn)
@@ -97,7 +102,7 @@ def main() -> None:
             print(f"план {rid} согласован ({a.by})")
             return
 
-        res = check_plan(conn, plan)
+        res = check_plan(conn, plan, load_brand_map(profile))
         accounts = {x.strip() for x in a.accounts.split(",") if x.strip()}
         types = {x.strip() for x in a.types.split(",") if x.strip()}
         gtype = {g.group_id: g.type for g in plan.groups}

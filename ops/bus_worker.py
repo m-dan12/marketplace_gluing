@@ -51,6 +51,12 @@ def bus_url() -> str:
     return url
 
 
+def profile_of() -> dict:
+    import tomllib
+    with open(ROOT / "profiles" / "ozon.toml", "rb") as f:
+        return tomllib.load(f)
+
+
 def as_of_of(ev) -> str:
     v = str(ev.payload.get("as_of") or ev.key or "")
     return v if DATE.fullmatch(v) else date.today().isoformat()
@@ -108,6 +114,7 @@ def handler_apply(bus):
             return
         import psycopg
         from apply_ozon import check_plan
+        from applier.brands import load_brand_map
         from plan_ozon import database_url
         from planner.store import PgStore
         rid = ev.payload["run_id"]
@@ -117,7 +124,7 @@ def handler_apply(bus):
             if plan is None:
                 raise RuntimeError(f"план {rid} не найден")
             status = store.status(rid)
-            res = check_plan(conn, plan)
+            res = check_plan(conn, plan, load_brand_map(profile_of()))
         bus.publish("gluing.ozon.dryrun_ready", key=ev.key,
                     payload={"run_id": rid, "status": status, "summary": res.summary(), "as_of": ev.payload.get("as_of")},
                     producer="gluing-apply", trace_id=ev.trace_id or str(ev.id))

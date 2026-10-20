@@ -1,5 +1,5 @@
 from applier.executor import MemoryJournal, Settings, execute, rollback
-from applier.ops import COLOR_NAME_ATTR, MODEL_NAME_ATTR, Op
+from applier.ops import BRAND_ATTR, COLOR_NAME_ATTR, MODEL_NAME_ATTR, Op
 
 
 class FakeOzon:
@@ -106,3 +106,40 @@ def test_rollback_reports_empty_previous_values():
     api, j = FakeOzon({"o0": {MODEL_NAME_ATTR: ""}}), MemoryJournal()
     execute("r", ops_for(api.cards), {"skazka": api}, j, ST)
     assert rollback("r", {"skazka": api}, j, ST)["очистить вручную (прежнее значение пустое)"] == ["o0"]
+
+
+class SpyOzon(FakeOzon):
+    def __init__(self, *a, **k):
+        super().__init__(*a, **k)
+        self.sent = []
+
+    def post(self, path, body):
+        if path == "/v1/product/attributes/update":
+            self.sent.append(body)
+        return super().post(path, body)
+
+
+def brand_ops(offers, frm="Сказка", to="Нет бренда", fid=100, tid=126745801):
+    return [Op("skazka", o, "set_brand", BRAND_ATTR, frm, to, "g", None, fid, tid) for o in offers]
+
+
+def test_brand_written_with_dictionary_id_before_other_ops_and_rolled_back_with_old_id():
+    api = SpyOzon({"o1": {BRAND_ATTR: "Сказка", MODEL_NAME_ATTR: "old"}})
+    j = MemoryJournal()
+    ops = [Op("skazka", "o1", "set_model_name", MODEL_NAME_ATTR, "old", "M1", "g")] + brand_ops(["o1"])
+    out = execute("r", ops, {"skazka": api}, j, ST)
+    assert out["result"].get("done") == 2
+    first = api.sent[0]["items"][0]["attributes"][0]
+    assert first["id"] == BRAND_ATTR and first["values"] == [{"dictionary_value_id": 126745801, "value": "Нет бренда"}]
+    assert api.cards["o1"][BRAND_ATTR] == "Нет бренда"
+    rollback("r", {"skazka": api}, j, ST)
+    back = [b for b in api.sent if b["items"][0]["attributes"][0]["id"] == BRAND_ATTR][-1]["items"][0]["attributes"][0]["values"]
+    assert back == [{"dictionary_value_id": 100, "value": "Сказка"}] and api.cards["o1"][BRAND_ATTR] == "Сказка"
+
+
+def test_rollback_of_brand_without_old_id_goes_to_manual_list():
+    api = SpyOzon({"o1": {BRAND_ATTR: ""}})
+    j = MemoryJournal()
+    execute("r", brand_ops(["o1"], frm="", fid=None), {"skazka": api}, j, ST)
+    out = rollback("r", {"skazka": api}, j, ST)
+    assert out["очистить вручную (прежнее значение пустое)"] == ["o1"]

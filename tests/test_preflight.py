@@ -84,3 +84,12 @@ def test_duplicates_empty_values_and_unglue_of_plan_member_stop():
 def test_target_mismatch_stops():
     rep = evaluate(plan(), run_of(op(to="OTHER")), "draft", SNAPS, TODAY)
     assert levels(rep)["имя в операции = цель группы в плане"] == STOP
+
+
+def test_brand_ops_without_dictionary_id_stop():
+    from applier.ops import Op as _Op
+    bad = _Op("skazka", "A1", "set_brand", 85, "", "Сказка", "g1")
+    assert levels(evaluate(plan(), run_of(bad), "draft", SNAPS, TODAY))["бренд: у операций есть id справочника"] == STOP
+    good = _Op("skazka", "A1", "set_brand", 85, "", "Сказка", "g1", None, None, 115857500)
+    rep = evaluate(plan(), run_of(good), "draft", SNAPS, TODAY)
+    assert levels(rep)["бренд: у операций есть id справочника"] == "ok" and "бренд: замены" in levels(rep)

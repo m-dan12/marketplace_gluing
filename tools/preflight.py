@@ -8,14 +8,16 @@ from __future__ import annotations
 
 import argparse
 import json
+import tomllib
 from collections import Counter
 from datetime import date
 
 import psycopg
 
+from applier.brands import load_brand_map
 from applier.preflight import evaluate, render
 from apply_ozon import check_plan
-from plan_ozon import database_url
+from plan_ozon import ROOT, database_url
 from planner.store import PgStore
 
 
@@ -25,13 +27,15 @@ def main() -> int:
     ap.add_argument("--json", default="")
     ap.add_argument("--examples", type=int, default=3, help="сколько примеров каждого вида операций показать")
     a = ap.parse_args()
+    with open(ROOT / "profiles" / "ozon.toml", "rb") as f:
+        profile = tomllib.load(f)
     with psycopg.connect(database_url()) as conn:
         store = PgStore(conn)
         plan = store.load(a.run) if a.run else store.last("ozon")
         if plan is None:
             raise SystemExit("план не найден")
         status = store.status(plan.run.run_id)
-        res = check_plan(conn, plan)
+        res = check_plan(conn, plan, load_brand_map(profile))
     snaps = {k: v for k, v in plan.run.inputs.items() if k in ("ozon_stock_snapshot", "rolls_snapshot")}
     rep = evaluate(plan, res, status, snaps, date.today())
     print(render(rep))

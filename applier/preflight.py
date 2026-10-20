@@ -106,6 +106,14 @@ def evaluate(plan: Plan, res: DryRun, status: str | None, snapshots: dict[str, s
     unglue_in_plan = [o for o in res.ops if o.op_type == "unglue_model" and o.offer_id in members]
     r.add(OK if not unglue_in_plan else STOP, "снимаем только артикулы вне плана", f"снятий артикулов из плана: {len(unglue_in_plan)}")
 
+    # --- бренд (set_brand): запись только по id справочника
+    brand_ops = [o for o in res.ops if o.op_type == "set_brand"]
+    no_id = [o for o in brand_ops if not o.to_id]
+    r.add(OK if not no_id else STOP, "бренд: у операций есть id справочника", f"set_brand {len(brand_ops)}, без id: {len(no_id)}")
+    if brand_ops:
+        trans = Counter((o.from_value or "(пусто)", o.to_value) for o in brand_ops)
+        r.add(OK, "бренд: замены", "; ".join(f"{a} -> {b}: {n}" for (a, b), n in trans.most_common(8)))
+
     # --- размеры результата
     sizes = [g.n_designs for g in plan.groups if g.kind in ("glue", "small_glue")]
     small = sum(1 for g in plan.groups if g.kind == "small_glue")

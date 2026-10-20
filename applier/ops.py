@@ -8,6 +8,7 @@ from __future__ import annotations
 from collections import defaultdict
 from dataclasses import dataclass, field
 
+from applier.brands import allowed_current, brand_ids, target_id
 from contract import Plan
 from planner.twins import signature
 
@@ -21,12 +22,14 @@ MAX_DESIGNS = 18
 class Op:
     account: str
     offer_id: str
-    op_type: str                # set_model_name | set_color_name
+    op_type: str                # set_brand | set_color_name | set_model_name | unglue_model
     attr_id: int
     from_value: str
     to_value: str
     group_id: str
     product_id: int | None = None
+    from_id: int | None = None  # dictionary_value_id «было» (бренд); для отката
+    to_id: int | None = None    # dictionary_value_id «стало» (бренд)
 
 
 @dataclass
@@ -59,12 +62,18 @@ def _first(attrs: dict, attr_id: int) -> str:
 
 
 def dry_run(plan: Plan, live: dict[tuple[str, str], dict], aspects: dict,
-            stock: dict[tuple[str, str], int] | None = None, min_total: int = 2) -> DryRun:
+            stock: dict[tuple[str, str], int] | None = None, min_total: int = 2,
+            brand_map: dict[str, str] | None = None) -> DryRun:
     """live: {(account, offer_id): {"cat": (category_id, type_id), "attrs": {attr_id: [values]}, "product_id": int|None}}
 
     stock: {(account, offer_id): остаток}. Если задан, артикулы вне плана с остатком меньше min_total, которые всё ещё
-    носят имя модели из плана, снимаются с неё (unglue_model: имя модели = собственный артикул, как у несклеенных карточек)."""
+    носят имя модели из плана, снимаются с неё (unglue_model: имя модели = собственный артикул, как у несклеенных карточек).
+
+    brand_map: {бренд плана: бренд на Озоне} (профиль, [ozon_brand]). Если задан, бренд карточек приводится к бренду плана
+    операциями set_brand (с id справочника); чужие бренды вне таблицы не трогаются, а попадают в предупреждения."""
     out = DryRun(run_id=plan.run.run_id)
+    ids = brand_ids(live) if brand_map else {}
+    okcur = allowed_current(brand_map) if brand_map else set()
     fixes: dict[tuple[str, str], str] = {}        # (account, offer) -> новое «Название цвета» из предложений плана
     for t in plan.checks.twins:
         for p in t["proposals"]:
@@ -88,7 +97,28 @@ def dry_run(plan: Plan, live: dict[tuple[str, str], dict], aspects: dict,
             reasons.append(f"разные категории/типы в группе: {sorted(types)}")
         if g.n_designs > MAX_DESIGNS:
             reasons.append(f"{g.n_designs} дизайнов, больше {MAX_DESIGNS}")
-        brands = {_first(live[k]["attrs"], BRAND_ATTR) for k in members if k in live} - {""}
+        brand_ops: list[Op] = []
+        want = (brand_map or {}).get(g.brand)
+        if brand_map is not None and want is None:
+            reasons.append(f"бренд плана «{g.brand}» не описан в [ozon_brand]")
+        elif want is not None:
+            for k in members:
+                if k not in live:
+                    continue
+                cur = _first(live[k]["attrs"], BRAND_ATTR)
+                if cur.casefold() == want.casefold():
+                    continue
+                if cur.casefold() not in okcur:
+                    out.warnings.append(f"{k[1]}: чужой бренд «{cur}» на Озоне, не меняем")
+                    continue
+                tid = target_id(ids, k[0], live[k]["cat"], want)
+                if tid is None:
+                    reasons.append(f"нет id бренда «{want}» среди карточек кабинета {k[0]}")
+                    break
+                brand_ops.append(Op(k[0], k[1], "set_brand", BRAND_ATTR, cur, want, g.group_id, live[k].get("product_id"),
+                                    live[k].get("brand_id"), tid))
+        changed = {o.offer_id for o in brand_ops}
+        brands = {(want if k[1] in changed else _first(live[k]["attrs"], BRAND_ATTR)) for k in members if k in live} - {""}
         if len(brands) > 1:
             out.warnings.append(f"{g.group_id}: в живых карточках несколько брендов {sorted(brands)}")
         # близнецы по живым атрибутам с учётом запланированных правок цвета
@@ -116,6 +146,7 @@ def dry_run(plan: Plan, live: dict[tuple[str, str], dict], aspects: dict,
         if reasons:
             out.blocked.append(Blocked(g.group_id, reasons))
             continue
+        out.ops.extend(brand_ops)
         for k in members:
             info = live[k]
             for typ, attr_id, new in (("set_color_name", COLOR_NAME_ATTR, fixes.get(k)),
@@ -141,7 +172,7 @@ def dry_run(plan: Plan, live: dict[tuple[str, str], dict], aspects: dict,
     return out
 
 
-OP_TYPES = ("set_color_name", "set_model_name", "unglue_model")
+OP_TYPES = ("set_brand", "set_color_name", "set_model_name", "unglue_model")
 
 
 def select_ops(ops: list[Op], group_type: dict[str, str], accounts: set[str] = frozenset(),

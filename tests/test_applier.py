@@ -1,5 +1,5 @@
 from contract import Check, Design, Group, Member, Plan, RunInfo
-from applier.ops import COLOR_NAME_ATTR, MODEL_NAME_ATTR, dry_run
+from applier.ops import BRAND_ATTR, COLOR_NAME_ATTR, MODEL_NAME_ATTR, dry_run
 
 CAT = (1, 2)
 ASP = {CAT: {COLOR_NAME_ATTR: "Название цвета", 6771: "Размер простыни"}}
@@ -97,3 +97,54 @@ def test_select_ops_filters_by_account_type_and_kind():
     assert [o.offer_id for o in select_ops(ops, gt, types={"Скатерть"})] == ["b"]        # снятия по типу не фильтруются
     with pytest.raises(ValueError):
         select_ops(ops, gt, only={"drop_table"})
+
+
+BM = {"Сказка": "Сказка", "Нет бренда": "Нет бренда"}
+
+
+def with_brand(item, text, bid):
+    item = {**item, "attrs": dict(item["attrs"]), "brand_id": bid}
+    if text:
+        item["attrs"][str(BRAND_ATTR)] = [text]
+    return item
+
+
+def test_set_brand_majority_id_empty_replaced_foreign_untouched():
+    p = plan([group("g_1", ["a", "b", "c"], 3)])
+    live = {("skazka", "a"): with_brand(live_item("Роза", "g_1"), "Сказка", 100),
+            ("skazka", "b"): with_brand(live_item("Лилия", "g_1"), "", None),
+            ("skazka", "c"): with_brand(live_item("Мак", "g_1"), "Котики Котики", 5)}
+    for i, bid in enumerate([100, 100, 200]):                          # кабинет: id 100 у большинства «Сказка», 200 редкий
+        live[("skazka", f"x{i}")] = with_brand(live_item("Роза", f"x{i}"), "Сказка", bid)
+    r = dry_run(p, live, ASP, brand_map=BM)
+    brand = [o for o in r.ops if o.op_type == "set_brand"]
+    assert [(o.offer_id, o.from_value, o.to_value, o.to_id) for o in brand] == [("b", "", "Сказка", 100)]
+    assert any("чужой бренд" in w and "c" in w for w in r.warnings)
+    assert any("несколько брендов" in w for w in r.warnings)             # чужой остался, смесь видна
+
+
+def test_set_brand_changes_wrong_own_brand_and_clears_mixed_warning():
+    g = group("g_1", ["a", "b"], 2)
+    g.brand = "Нет бренда"                                              # бренд плана = «Нет бренда» (Анна Мария)
+    live = {("skazka", "a"): with_brand(live_item("Роза", "g_1"), "Нет бренда", 126745801),
+            ("skazka", "b"): with_brand(live_item("Лилия", "g_1"), "Сказка", 100)}
+    r = dry_run(plan([g]), live, ASP, brand_map=BM)                 # «Сказка» в таблице — своя, её можно заменять
+    brand = [o for o in r.ops if o.op_type == "set_brand"]
+    assert [(o.offer_id, o.from_value, o.to_value, o.from_id, o.to_id) for o in brand] == [("b", "Сказка", "Нет бренда", 100, 126745801)]
+    assert not any("несколько брендов" in w for w in r.warnings)
+
+
+def test_brand_without_known_id_or_mapping_blocks_group():
+    live = {("skazka", "a"): with_brand(live_item("Роза", "g_1"), "", None)}
+    r = dry_run(plan([group("g_1", ["a"], 1)]), live, ASP, brand_map=BM)           # нет ни одной карточки с id «Сказка»
+    assert r.blocked and "нет id бренда" in r.blocked[0].reasons[0]
+    r = dry_run(plan([group("g_1", ["a"], 1)]), live, ASP, brand_map={"Другой": "X"})
+    assert r.blocked and "не описан" in r.blocked[0].reasons[0]
+
+
+def test_case_difference_is_not_a_change_and_brand_off_without_map():
+    live = {("skazka", "a"): with_brand(live_item("Роза", "g_1"), "СКАЗКА", 9)}
+    r = dry_run(plan([group("g_1", ["a"], 1)]), live, ASP, brand_map=BM)
+    assert not [o for o in r.ops if o.op_type == "set_brand"]
+    r = dry_run(plan([group("g_1", ["a"], 1)]), live, ASP)
+    assert not [o for o in r.ops if o.op_type == "set_brand"]
