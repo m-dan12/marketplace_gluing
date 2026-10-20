@@ -1,0 +1,9 @@
+# Профиль: Wildberries, кабинет Timeless. Правила Профтекса, кроме списков эко/детских и брендовых исключений.
+extends = "wb_proftex.toml"
+cabinet = "timeless"
+
+[rules]
+ruffle_brands = ["Timeless"]
+whole_category_brands = {}
+no_eco_brands = []
+use_lists = false
