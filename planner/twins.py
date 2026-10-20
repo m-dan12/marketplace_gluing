@@ -20,8 +20,11 @@ def load_aspects(conn) -> dict[tuple[int, int], dict[int, str]]:
 def load_attrs(conn) -> dict[tuple[str, str], dict]:
     """(account, offer_id) -> {category_id, type_id, name, attrs}."""
     with conn.cursor() as cur:
+        cur.execute("select category_id, type_id, attr_id from gluing.category_attr where attr_id in (85, 31) order by attr_id desc")
+        brand_attr = {(c, t): a for c, t, a in cur.fetchall()}        # если в категории есть обе характеристики, побеждает 85
         cur.execute("select account, offer_id, category_id, type_id, name, attrs, product_id, brand_id from gluing.sku_attr")
-        return {(a, o): {"cat": (c, t), "name": n, "attrs": at, "product_id": pid, "brand_id": bid}
+        return {(a, o): {"cat": (c, t), "name": n, "attrs": at, "product_id": pid, "brand_id": bid,
+                         "brand_attr": brand_attr.get((c, t), 85)}
                 for a, o, c, t, n, at, pid, bid in cur.fetchall()}
 
 

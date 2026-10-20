@@ -8,7 +8,7 @@ from __future__ import annotations
 from collections import defaultdict
 from dataclasses import dataclass, field
 
-from applier.brands import allowed_current, brand_ids, target_id
+from applier.brands import NO_BRAND, allowed_current, brand_attr_of, brand_ids, target_id
 from contract import Plan
 from planner.twins import signature
 
@@ -105,9 +105,10 @@ def dry_run(plan: Plan, live: dict[tuple[str, str], dict], aspects: dict,
             for k in members:
                 if k not in live:
                     continue
-                cur = _first(live[k]["attrs"], BRAND_ATTR)
-                if cur.casefold() == want.casefold():
-                    continue
+                battr = brand_attr_of(live[k])
+                cur = _first(live[k]["attrs"], battr)
+                if cur.casefold() == want.casefold() or (not cur and want.casefold() == NO_BRAND):
+                    continue                                    # совпадает; пустой бренд = «Нет бренда» (Озон такую запись пропускает)
                 if cur.casefold() not in okcur:
                     out.warnings.append(f"{k[1]}: чужой бренд «{cur}» на Озоне, не меняем")
                     continue
@@ -115,10 +116,10 @@ def dry_run(plan: Plan, live: dict[tuple[str, str], dict], aspects: dict,
                 if tid is None:
                     reasons.append(f"нет id бренда «{want}» среди карточек кабинета {k[0]}")
                     break
-                brand_ops.append(Op(k[0], k[1], "set_brand", BRAND_ATTR, cur, want, g.group_id, live[k].get("product_id"),
+                brand_ops.append(Op(k[0], k[1], "set_brand", battr, cur, want, g.group_id, live[k].get("product_id"),
                                     live[k].get("brand_id"), tid))
         changed = {o.offer_id for o in brand_ops}
-        brands = {(want if k[1] in changed else _first(live[k]["attrs"], BRAND_ATTR)) for k in members if k in live} - {""}
+        brands = {(want if k[1] in changed else _first(live[k]["attrs"], brand_attr_of(live[k]))) for k in members if k in live} - {""}
         if len(brands) > 1:
             out.warnings.append(f"{g.group_id}: в живых карточках несколько брендов {sorted(brands)}")
         # близнецы по живым атрибутам с учётом запланированных правок цвета

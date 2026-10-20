@@ -7,7 +7,10 @@ from __future__ import annotations
 
 from collections import Counter
 
-BRAND_ATTR = 85
+BRAND_ATTR = 85                    # «Бренд»
+BRAND_ATTR_CLOTHES = 31           # «Бренд в одежде и обуви» (категория одежды, тот же справочник)
+BRAND_ATTRS = (BRAND_ATTR, BRAND_ATTR_CLOTHES)
+NO_BRAND = "нет бренда"           # Озон не отличает пустой бренд от «Нет бренда»: запись такого значения в пустое поле он пропускает (skipped)
 
 
 def load_brand_map(profile: dict) -> dict[str, str]:
@@ -15,8 +18,13 @@ def load_brand_map(profile: dict) -> dict[str, str]:
     return dict(profile.get("ozon_brand") or {})
 
 
+def brand_attr_of(info: dict) -> int:
+    """Характеристика бренда карточки по её категории (85 или 31)."""
+    return info.get("brand_attr") or BRAND_ATTR
+
+
 def _text(info: dict) -> str:
-    v = (info.get("attrs") or {}).get(str(BRAND_ATTR)) or []
+    v = (info.get("attrs") or {}).get(str(brand_attr_of(info))) or []
     return v[0] if v else ""
 
 

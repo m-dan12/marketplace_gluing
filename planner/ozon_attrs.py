@@ -73,9 +73,9 @@ def flatten(item: dict) -> dict[str, list[str]]:
 
 
 def brand_id_of(item: dict) -> int | None:
-    """dictionary_value_id бренда (атрибут 85) из карточки; None, если бренд не задан."""
+    """dictionary_value_id бренда (атрибут 85, в одежде 31) из карточки; None, если бренд не задан."""
     for a in item.get("attributes") or []:
-        if a.get("id") == 85:
+        if a.get("id") in (85, 31):
             for v in a.get("values") or []:
                 if v.get("dictionary_value_id"):
                     return int(v["dictionary_value_id"])

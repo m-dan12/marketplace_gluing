@@ -62,9 +62,9 @@ class PgJournal:
         ids = []
         with self.conn.transaction(), self.conn.cursor() as cur:
             for o in ops:
-                cur.execute("insert into gluing.op(run_id,account,offer_id,op_type,from_value,to_value,from_id,to_id)"
-                            " values (%s,%s,%s,%s,%s,%s,%s,%s) returning op_id",
-                            (run_id, o.account, o.offer_id, o.op_type, o.from_value, o.to_value, o.from_id, o.to_id))
+                cur.execute("insert into gluing.op(run_id,account,offer_id,op_type,from_value,to_value,from_id,to_id,attr_id)"
+                            " values (%s,%s,%s,%s,%s,%s,%s,%s,%s) returning op_id",
+                            (run_id, o.account, o.offer_id, o.op_type, o.from_value, o.to_value, o.from_id, o.to_id, o.attr_id))
                 ids.append(cur.fetchone()[0])
         return ids
 
@@ -75,17 +75,17 @@ class PgJournal:
                         (status, error, status, op_id))
 
     def rows(self, run_id, status=None):
-        q, args = ("select op_id,run_id,account,offer_id,op_type,from_value,to_value,status,coalesce(error,''),from_id,to_id"
+        q, args = ("select op_id,run_id,account,offer_id,op_type,from_value,to_value,status,coalesce(error,''),from_id,to_id,attr_id"
                    " from gluing.op where run_id=%s"), [run_id]
         if status:
             q += " and status=%s"
             args.append(status)
         with self.conn.cursor() as cur:
             cur.execute(q + " order by op_id", args)
-            cols = ["op_id", "run_id", "account", "offer_id", "op_type", "from_value", "to_value", "status", "error", "from_id", "to_id"]
+            cols = ["op_id", "run_id", "account", "offer_id", "op_type", "from_value", "to_value", "status", "error", "from_id", "to_id", "attr_id"]
             out = [dict(zip(cols, r)) for r in cur.fetchall()]
         for r in out:
-            r["attr_id"] = self.ATTR.get(r["op_type"], 0)
+            r["attr_id"] = r["attr_id"] or self.ATTR.get(r["op_type"], 0)
         return out
 
 
@@ -118,6 +118,7 @@ class Settings:
     probe: bool = True
     max_ops: int = 1500
     verify_pause: int = 30
+    recheck: int = 120          # повторная сверка всех применённых значений через столько секунд (0 — выключена)
     sleep: Callable = time.sleep
 
 
@@ -173,6 +174,28 @@ def _apply_group(api: Api, rows: list[dict], attr_id: int, journal: Journal, st:
     return res
 
 
+def _recheck(run_id: str, op_ids: set[int], apis: dict[str, Api], journal: Journal, st: Settings) -> Counter:
+    """Озон иногда принимает запись, показывает новое значение и потом откатывает его. Через st.recheck секунд перечитываем всё
+    применённое: что не закрепилось, помечается failed (и вычитается из done)."""
+    out: Counter = Counter()
+    if not st.recheck:
+        return out
+    st.sleep(st.recheck)
+    by: dict[tuple, list[dict]] = {}
+    for r in journal.rows(run_id, "done"):
+        if r["op_id"] in op_ids:
+            by.setdefault((r["account"], r["attr_id"]), []).append(r)
+    for (acc, aid), rs in by.items():
+        now = read_values(apis[acc], [r["offer_id"] for r in rs], aid)
+        for r in rs:
+            if now.get(r["offer_id"]) != r["to_value"]:
+                journal.update(r["op_id"], "failed", f"не закрепилось: через {st.recheck} с на Озоне «{now.get(r['offer_id'], '')}»")
+                out["done"] -= 1
+                out["failed"] += 1
+                out["слетело после повторной сверки"] += 1
+    return out
+
+
 def execute(run_id: str, ops: list[Op], apis: dict[str, Api], journal: Journal, st: Settings | None = None) -> dict:
     """Применяет операции. Сначала бренд (склеивать можно только карточки одного бренда), затем правки цвета (чтобы убрать
     близнецов), потом названия моделей, потом снятие с модели."""
@@ -203,9 +226,10 @@ def execute(run_id: str, ops: list[Op], apis: dict[str, Api], journal: Journal, 
             return {"stopped": "probe_failed", "result": dict(summary)}
     groups: dict[tuple, list[dict]] = {}
     for r in rows:
-        groups.setdefault((r["op_type"], r["account"]), []).append(r)
-    for (typ, acc), g in groups.items():
-        summary.update(_apply_group(apis[acc], g, g[0]["attr_id"], journal, st, True))
+        groups.setdefault((r["op_type"], r["account"], r["attr_id"]), []).append(r)
+    for (typ, acc, aid), g in groups.items():
+        summary.update(_apply_group(apis[acc], g, aid, journal, st, True))
+    summary.update(_recheck(run_id, set(ids), apis, journal, st))
     return {"result": dict(summary)}
 
 
@@ -222,13 +246,13 @@ def rollback(run_id: str, apis: dict[str, Api], journal: Journal, st: Settings |
     summary: Counter = Counter()
     groups: dict[tuple, list[dict]] = {}
     for r in todo:
-        groups.setdefault((r["op_type"], r["account"]), []).append(r)
-    for (typ, acc), g in groups.items():
+        groups.setdefault((r["op_type"], r["account"], r["attr_id"]), []).append(r)
+    for (typ, acc, aid), g in groups.items():
         class _Rev:                                    # журнал отката обновляет исходные операции
             def update(self, op_id, status, error=""):
                 if status == "done":
                     journal.update(op_id, "reverted")
                 else:                                  # откат не удался: исходная операция остаётся применённой
                     journal.update(op_id, "done", f"откат не удался: {error}")
-        summary.update(_apply_group(apis[acc], g, g[0]["attr_id"], _Rev(), st, True))
+        summary.update(_apply_group(apis[acc], g, aid, _Rev(), st, True))
     return {"result": dict(summary), "очистить вручную (прежнее значение пустое)": [r["offer_id"] for r in manual]}
