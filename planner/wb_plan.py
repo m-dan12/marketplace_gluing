@@ -25,18 +25,24 @@ def check_wb_groups(groups: list[Group], profile: dict) -> Check:
     lim = profile["limits"]
     hard: list[str] = []
     warn: list[str] = []
+    mixed_n = 0
     for g in groups:
         sizes = {size_key_of(m.offer_id, profile) for d in g.designs for m in d.members}
         if g.n_skus > lim["max_group"]:
             hard.append(f"{g.group_id}: {g.n_skus} карточек, больше {lim['max_group']}")
-        if len(sizes) > 1:
+        mixed = g.target.get("wb", {}).get("mixed", False)
+        if len(sizes) > 1 and not mixed:
             hard.append(f"{g.group_id}: в группе несколько размеров {sorted(sizes)}")
+        if mixed and len(sizes) > 1:
+            mixed_n += 1
         if g.kind == "small_glue":
             warn.append(f"{g.group_id}: малая группа из {g.n_skus} карточек")
         elif g.kind == "single_design":
             warn.append(f"{g.group_id}: одиночная карточка")
         if g.target.get("wb", {}).get("grown"):
             warn.append(f"{g.group_id}: {g.n_skus} карточек, больше рабочего {lim.get('work_group', lim['max_group'])} (допуск роста)")
+    if mixed_n:
+        warn.append(f"{mixed_n} групп со смешанными размерами (хвосты размеров и бренды «вся категория вместе»)")
     return Check(hard_violations=hard, warnings=warn)
 
 
@@ -56,7 +62,7 @@ def build_wb_groups(account: str, build: WbBuild, live: dict[int, int]) -> list[
                 offer_id=c.article, stock=c.stock_total, orders_28d=c.orders30,
                 platform_ids={"nm_id": c.nm_id, "imt_id": live.get(c.nm_id)}))
         groups.append(Group(group_id=gid, key=key, account=account, brand=s.brand, type=s.category, branch=s.rule, part=s.part,
-                            kind=s.kind, target={"wb": {"imt_id": s.imt_id, "new": s.imt_id is None, "grown": s.grown}},
+                            kind=s.kind, target={"wb": {"imt_id": s.imt_id, "new": s.imt_id is None, "grown": s.grown, "mixed": s.mixed}},
                             designs=[Design(design=d, members=ms) for d, ms in by_design.items()],
                             reasons=[f"ветка «{s.rule}»", f"размер {s.size_key}", f"{len(s.cards)} карточек"]))
     return groups

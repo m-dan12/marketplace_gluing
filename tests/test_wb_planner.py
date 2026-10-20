@@ -23,13 +23,14 @@ def card(design: int, key: str = "0-0-26", nm: int | None = None, stock: int = 5
     return c
 
 
-def run(cards, live=None, members=None):
+def run(cards, live=None, members=None, tails=False):
+    prof = {**PROFILE, "rules": {**PROFILE["rules"], "merge_tails": tails}}
     live = live or {}
     members = members or {}
     for c in cards:
         if c.nm_id in live:
             members.setdefault(live[c.nm_id], set()).add(c.nm_id)
-    return build_wb(cards, live, members, PROFILE, CTX)
+    return build_wb(cards, live, members, prof, CTX)
 
 
 def sizes(res):
@@ -115,3 +116,36 @@ def test_deterministic():
     b = run(list(reversed(cards)), live=dict(live))
     pick = lambda r: sorted((g.imt_id or 0, tuple(sorted(c.nm_id for c in g.cards))) for g in r.groups)
     assert pick(a) == pick(b)
+
+
+def test_tails_of_neighbour_sizes_are_pooled():
+    cards = [card(1000 + i, "0-0-20") for i in range(4)] + [card(2000 + i, "0-0-22") for i in range(3)] +             [card(3000 + i, "0-0-26") for i in range(8)]
+    strict = run(cards)
+    assert sorted(g.kind for g in strict.groups) == ["glue", "small_glue", "small_glue"]
+    res = run(cards, tails=True)
+    assert sorted(len(g.cards) for g in res.groups) == [7, 8] and all(g.kind == "glue" for g in res.groups)   # 4+3 хвостов в одной группе
+    assert sum(g.mixed for g in res.groups) == 1
+
+
+def test_lonely_tail_attaches_to_nearest_size_with_room():
+    cards = [card(1000 + i, "0-0-26") for i in range(10)] + [card(3000, "0-0-20")]
+    res = run(cards, tails=True)
+    assert len(res.groups) == 1 and len(res.groups[0].cards) == 11 and res.groups[0].mixed
+
+
+def test_rhomb_is_never_mixed():
+    cards = [card(1000 + i, "44-0-0", cat="Пододеяльники") for i in range(3)] + [card(2000 + i, "54-0-0", cat="Пододеяльники") for i in range(3)]
+    res = run(cards, tails=True)
+    assert len(res.groups) == 2 and not any(g.mixed for g in res.groups)
+
+
+def test_whole_category_brand_is_not_split_by_size():
+    cards = [card(1000 + i, k, prefix="PC", cat="Наволочки") for i, k in enumerate(["0-0-20", "0-0-22", "0-0-24", "0-0-26", "0-0-20", "0-0-22", "0-0-24", "0-0-26"])]
+    res = run(cards)                                           # слияние хвостов выключено: бренд делится только правилом «вся категория вместе»
+    assert len(res.groups) == 1 and res.groups[0].mixed and res.groups[0].bid == "whole"
+
+
+def test_tails_do_not_cross_category_or_brand():
+    cards = [card(1000 + i, "0-0-20") for i in range(3)] + [card(2000 + i, "0-0-22", cat="Простыни") for i in range(3)] +             [card(3000 + i, "0-0-24", prefix="MT") for i in range(3)]
+    res = run(cards, tails=True)
+    assert len(res.groups) == 3 and not any(g.mixed for g in res.groups)

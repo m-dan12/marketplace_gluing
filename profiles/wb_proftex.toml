@@ -26,6 +26,12 @@ ruffle_brands = ["Сказка"]             # рюши отдельно тол�
 rhomb_first = ["44", "54"]             # ромбы: пододеяльники, только свой ключ
 order = ["carnival", "decor", "whole_category", "button", "kant", "rhomb", "eco_ruffle", "eco", "ruffle", "child", "generic"]
 
+# хвосты размеров: остатки меньше min_group объединяются с соседними размерами той же ветки, категории и бренда (смешение размеров допускается
+# только так); ветки из mix_sizes_bids не делятся по размеру совсем; семейства из no_mix_families не смешиваются никогда
+merge_tails = true
+mix_sizes_bids = ["whole"]
+no_mix_families = ["rhomb"]
+
 [solver]
 deterministic_limit = 25   # лимит поиска на пару бренд+категория (условные единицы, результат повторяем)
 workers = 8
