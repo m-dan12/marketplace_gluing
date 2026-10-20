@@ -13,6 +13,7 @@ from contract import Plan
 from planner.twins import signature
 
 MODEL_NAME_ATTR = 9048          # «Название модели»: единое значение = одна склейка на Озоне
+MERGE_ATTR = 8292               # «Объединить на одной карточке»: то же у категорий одежды, где «Названия модели» нет
 COLOR_NAME_ATTR = 10097         # «Название цвета»
 BRAND_ATTR = 85                 # «Бренд»
 MAX_DESIGNS = 18
@@ -56,6 +57,11 @@ class DryRun:
                 "групп заблокировано": len(self.blocked), "предупреждений": len(self.warnings)}
 
 
+def group_attr_of(info: dict) -> int:
+    """Характеристика, по которой Озон склеивает карточки этой категории: 9048, а у одежды 8292."""
+    return info.get("group_attr") or MODEL_NAME_ATTR
+
+
 def _first(attrs: dict, attr_id: int) -> str:
     v = attrs.get(str(attr_id)) or []
     return v[0] if v else ""
@@ -81,7 +87,7 @@ def dry_run(plan: Plan, live: dict[tuple[str, str], dict], aspects: dict,
                 fixes[(next(g.account for g in plan.groups if g.group_id == t["group_id"]), offer)] = p["new_value"]
     holders: dict[tuple[str, str], list[str]] = defaultdict(list)       # (кабинет, имя модели) -> артикулы на площадке
     for (acc, off), info in live.items():
-        name = _first(info["attrs"], MODEL_NAME_ATTR)
+        name = _first(info["attrs"], group_attr_of(info))
         if name:
             holders[(acc, name)].append(off)
     planned_elsewhere = {(g.account, m.offer_id) for g in plan.groups for d in g.designs for m in d.members}
@@ -151,7 +157,7 @@ def dry_run(plan: Plan, live: dict[tuple[str, str], dict], aspects: dict,
         for k in members:
             info = live[k]
             for typ, attr_id, new in (("set_color_name", COLOR_NAME_ATTR, fixes.get(k)),
-                                      ("set_model_name", MODEL_NAME_ATTR, target)):
+                                      ("set_model_name", group_attr_of(info), target)):
                 if new is None:
                     continue
                 cur = _first(info["attrs"], attr_id)
@@ -164,12 +170,12 @@ def dry_run(plan: Plan, live: dict[tuple[str, str], dict], aspects: dict,
         blocked_names = {(g.account, g.target.get("ozon", {}).get("model_name", g.group_id)) for g in plan.groups
                          if g.group_id in {b.group_id for b in out.blocked}}
         for (acc, offer), info in sorted(live.items()):
-            cur = _first(info["attrs"], MODEL_NAME_ATTR)
+            cur = _first(info["attrs"], group_attr_of(info))
             if (acc, offer) in planned_elsewhere or (acc, cur) not in targets or (acc, cur) in blocked_names:
                 continue
             if cur == offer or stock.get((acc, offer), 0) >= min_total:
                 continue                                  # уже сам по себе, либо вне плана по другой причине (остаток есть)
-            out.ops.append(Op(acc, offer, "unglue_model", MODEL_NAME_ATTR, cur, offer, "", info.get("product_id")))
+            out.ops.append(Op(acc, offer, "unglue_model", group_attr_of(info), cur, offer, "", info.get("product_id")))
     return out
 
 

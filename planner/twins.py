@@ -22,9 +22,11 @@ def load_attrs(conn) -> dict[tuple[str, str], dict]:
     with conn.cursor() as cur:
         cur.execute("select category_id, type_id, attr_id from gluing.category_attr where attr_id in (85, 31) order by attr_id desc")
         brand_attr = {(c, t): a for c, t, a in cur.fetchall()}        # если в категории есть обе характеристики, побеждает 85
+        cur.execute("select category_id, type_id, attr_id from gluing.category_attr where attr_id in (9048, 8292) order by attr_id desc")
+        group_attr = {(c, t): a for c, t, a in cur.fetchall()}        # 8292 только если в категории нет 9048 «Название модели»
         cur.execute("select account, offer_id, category_id, type_id, name, attrs, product_id, brand_id from gluing.sku_attr")
         return {(a, o): {"cat": (c, t), "name": n, "attrs": at, "product_id": pid, "brand_id": bid,
-                         "brand_attr": brand_attr.get((c, t), 85)}
+                         "brand_attr": brand_attr.get((c, t), 85), "group_attr": group_attr.get((c, t), 9048)}
                 for a, o, c, t, n, at, pid, bid in cur.fetchall()}
 
 
@@ -85,7 +87,7 @@ def live_models(attrs: dict, attr_id: int = 9048) -> dict[str, str]:
     """{offer_id: живое «Название модели»} из снимка атрибутов (артикулы разных кабинетов не пересекаются)."""
     out = {}
     for (acc, offer), info in attrs.items():
-        v = (info["attrs"].get(str(attr_id)) or [""])[0]
+        v = (info["attrs"].get(str(info.get("group_attr") or attr_id)) or [""])[0]
         if v:
             out[offer] = v
     return out
