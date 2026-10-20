@@ -258,3 +258,27 @@ def test_twin_rename_covers_the_whole_design_not_only_clashing_offers():
     aspects = {cat: {10097: "Название цвета", 6771: "Размер простыни"}}
     tw = twins_check([g], attrs, aspects, {10097: "Название цвета", 6771: "Размер простыни"})
     assert tw[0]["proposals"][0]["offers"] == ["b", "c"] and tw[0]["proposals"][0]["new_value"] == "Бисер 2"
+
+
+def test_unify_colors_prefers_names_over_color_lists_and_offer_codes():
+    from gluing.ozon.model import OGroup
+    from planner.plan import is_color_name, unify_colors
+    assert is_color_name("Nicol") and is_color_name("Бисер/Бисер (компаньон)") and is_color_name("Классика белая")
+    assert not is_color_name("белый; серо-зеленый") and not is_color_name("MY3761/5-20-26/1") and not is_color_name("3526")
+    g = OGroup(key="k", account="skazka", brand="Сказка", typ="Комплект", leaf="Обычные", idx=1, kind="склейка",
+               designs=[_kit("PT1", ["a", "b", "c"]), _kit("PT2", ["d", "e"])])
+    cat = (1, 2)
+    mk = lambda c: {"cat": cat, "name": "", "attrs": {"10097": [c]}}
+    # у PT1 список цветов в большинстве, но есть одно настоящее название; у PT2 только списки и артикул: не трогаем
+    attrs = {("skazka", o): mk(c) for o, c in zip("abcde", ["белый;серый", "белый;серый", "Nicol", "бежевый; голубой", "PT2/5-1-1/1"])}
+    rec, fixes = unify_colors([g], attrs, {cat: {10097: "Название цвета"}})
+    assert [(r["design"], r["value"]) for r in rec] == [("PT1", "Nicol")] and set(fixes) == {("skazka", "a"), ("skazka", "b")}
+
+
+def test_twin_proposal_does_not_use_seller_code_as_colour_tail():
+    from planner.twins import distinguishing_value
+    cat = (1, 2)
+    attrs = {("skazka", "a"): {"cat": cat, "name": "", "attrs": {"9999": ["PT343/4-1-1/1"]}},
+             ("skazka", "b"): {"cat": cat, "name": "", "attrs": {"9999": ["PT344/4-1-1/1"]}}}
+    names = {9999: "Код продавца"}
+    assert distinguishing_value("skazka", ["a"], ["b"], attrs, {cat: {}}, names) == ("", "")

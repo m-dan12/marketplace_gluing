@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from collections import Counter
 from datetime import datetime, timezone
 
@@ -47,11 +48,20 @@ def with_colors(attrs: dict, fixes: dict[tuple[str, str], str]) -> dict:
     return out
 
 
+_OFFER_LIKE = re.compile(r"^[A-Za-zА-Яа-я]{0,4}\d+/")
+
+
+def is_color_name(value: str) -> bool:
+    """Похоже ли значение на название цвета/коллекции: не список цветов («белый;серый»), не артикул («MY3761/5-20-26/1»), не число."""
+    v = value.strip()
+    return bool(v) and ";" not in v and not _OFFER_LIKE.match(v) and not v.isdigit()
+
+
 def unify_colors(groups: list[OGroup], attrs: dict, aspects: dict) -> tuple[list[dict], dict[tuple[str, str], str]]:
     """Одно «Название цвета» на дизайн: иначе Озон показывает его артикулы в склейке соседними иконками.
 
-    Берётся самое частое значение среди артикулов дизайна (вес: заказы за 28 дней + 1), при равенстве — по алфавиту. Пустые
-    значения заполняются. Только для категорий, где «Название цвета» есть среди вариативных характеристик; дизайн без единого
+    Берётся самое частое значение среди артикулов дизайна (вес: заказы за 28 дней + 1), при равенстве — по алфавиту; побеждают
+    только названия (не списки цветов и не артикулы), если названия нет — дизайн не трогаем. Пустые значения заполняются. Только для категорий, где «Название цвета» есть среди вариативных характеристик; дизайн без единого
     значения не трогаем (выдумывать название нельзя). -> (записи для плана, {(кабинет, артикул): новое значение})."""
     by_design: dict[tuple[str, str], list] = {}
     for g in groups:
@@ -66,7 +76,7 @@ def unify_colors(groups: list[OGroup], attrs: dict, aspects: dict) -> tuple[list
         weight: Counter = Counter()
         for s in skus:
             v = _color_of(attrs, (acc, s.offer_id))
-            if v:
+            if is_color_name(v):
                 weight[v] += s.orders28 + 1
         if not weight:
             continue
