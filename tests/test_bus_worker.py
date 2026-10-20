@@ -11,9 +11,11 @@ from ops import bus_worker  # noqa: E402
 
 
 def make_worker(bus, role):
-    name, pattern, make = bus_worker.ROLES[role]
+    name, patterns, make = bus_worker.ROLES[role]
     router = Router()
-    router.on(pattern)(make(bus))
+    handler = make(bus)
+    for pattern in patterns:
+        router.on(pattern)(handler)
     return Worker(bus, name, router, max_attempts=2, visibility_sec=60)
 
 
@@ -29,8 +31,8 @@ def setup(monkeypatch, result=None, fail=False):
     monkeypatch.setitem(sys.modules, "plan_ozon", types.SimpleNamespace(run_plan=fake_run_plan))
     bus = MemoryBus()
     for role in bus_worker.ROLES:
-        name, pattern, _ = bus_worker.ROLES[role]
-        bus.register(name, [pattern])
+        name, patterns, _ = bus_worker.ROLES[role]
+        bus.register(name, patterns)
     return bus, calls
 
 

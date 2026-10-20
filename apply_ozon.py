@@ -128,8 +128,26 @@ def main() -> None:
         out = execute(rid, res.ops, apis, PgJournal(conn), Settings(probe=a.probe, max_ops=a.max_ops))
         print(json.dumps(out, ensure_ascii=False, indent=1, default=str))
         r = out.get("result", {})
-        ok = r.get("done", 0) == sum(r.values()) and not out.get("stopped")
-        store.set_status(rid, "applied" if ok else ("failed" if out.get("stopped") else "partial"), a.by or "apply")
+        ok = not (r.get("failed", 0) + r.get("skipped", 0)) and not out.get("stopped")     # доп. счётчики сверки в сумму не входят
+        status_after = "applied" if ok else ("failed" if out.get("stopped") else "partial")
+        store.set_status(rid, status_after, a.by or "apply")
+        publish_applied(rid, res, out, status_after)
+
+
+def publish_applied(rid: str, res, out: dict, status: str) -> None:
+    """Итог применения в шину (для уведомлений); сбой шины не должен ронять применение."""
+    try:
+        from busclient import PgBus
+        from ops.bus_worker import bus_url
+        bus = PgBus(bus_url())
+        try:
+            bus.publish("gluing.ozon.applied", key=rid, payload={
+                "run_id": rid, "status": status, "ops": len(res.ops), "result": out.get("result", {}),
+                "stopped": out.get("stopped"), "summary": res.summary(), "members": res.members}, producer="apply_ozon")
+        finally:
+            bus.close()
+    except Exception as e:                                           # noqa: BLE001
+        print("итог в шину не опубликован:", e)
 
 
 if __name__ == "__main__":

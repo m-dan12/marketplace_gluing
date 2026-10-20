@@ -114,28 +114,78 @@ def handler_apply(bus):
             return
         import psycopg
         from apply_ozon import check_plan
+        from applier.autoapply import decide, load_config
         from applier.brands import load_brand_map
+        from applier.preflight import evaluate
         from plan_ozon import database_url
         from planner.store import PgStore
         rid = ev.payload["run_id"]
+        prof = profile_of()
         with psycopg.connect(database_url()) as conn:
             store = PgStore(conn)
             plan = store.load(rid)
             if plan is None:
                 raise RuntimeError(f"план {rid} не найден")
             status = store.status(rid)
-            res = check_plan(conn, plan, load_brand_map(profile_of()))
+            res = check_plan(conn, plan, load_brand_map(prof))
+        trace = ev.trace_id or str(ev.id)
         bus.publish("gluing.ozon.dryrun_ready", key=ev.key,
                     payload={"run_id": rid, "status": status, "summary": res.summary(), "as_of": ev.payload.get("as_of")},
-                    producer="gluing-apply", trace_id=ev.trace_id or str(ev.id))
+                    producer="gluing-apply", trace_id=trace)
         log.info("dry-run плана %s: %s", rid, res.summary())
+
+        # --- автоприменение: решение принимает предполётный отчёт, любое «нет» становится событием apply_blocked
+        if ev.key and any(bus.find(t, ev.key) for t in ("gluing.ozon.apply_started", "gluing.ozon.applied", "gluing.ozon.apply_blocked")):
+            return
+        from ops import apply_runner
+        snaps = {k: v for k, v in plan.run.inputs.items() if k in ("ozon_stock_snapshot", "rolls_snapshot")}
+        rep = evaluate(plan, res, status, snaps, date.today())
+        cfg = load_config(prof)
+        d = decide(rep, len(res.ops), cfg, (ROOT / cfg.kill_file).exists(), apply_runner.is_running() if cfg.enabled else False)
+        info = {"run_id": rid, "as_of": ev.payload.get("as_of"), "ops": len(res.ops), "summary": res.summary(),
+                "warns": [i.name for i in rep.warns], "members": rep.metrics.get("members")}
+        if d.action == "off":
+            log.info("автоприменение выключено: план %s ждёт ручного согласования", rid)
+        elif d.action == "skip_empty":
+            bus.publish("gluing.ozon.applied", key=ev.key or rid, payload={**info, "status": status, "result": {}},
+                        producer="gluing-apply", trace_id=trace)
+            log.info("план %s: изменений не нужно", rid)
+        elif d.action == "blocked":
+            bus.publish("gluing.ozon.apply_blocked", key=ev.key or rid, payload={**info, "reasons": d.reasons},
+                        producer="gluing-apply", trace_id=trace)
+            log.warning("автоприменение плана %s остановлено: %s", rid, "; ".join(d.reasons))
+        else:
+            with psycopg.connect(database_url(), autocommit=True) as conn:
+                PgStore(conn).set_status(rid, "approved", "auto")
+            apply_runner.start(rid, str(env_path_of()), cfg.max_ops)
+            bus.publish("gluing.ozon.apply_started", key=ev.key or rid, payload=info, producer="gluing-apply", trace_id=trace)
+            log.info("автоприменение плана %s запущено: %s операций", rid, len(res.ops))
     return guard(h)
 
 
+def env_path_of():
+    from applier.ozon_client import env_path
+    return env_path(conf("MARKETPLACE_ENV"))
+
+
+def handler_notify(bus):
+    from ops import notify
+    client = notify.from_conf(conf)
+    if client is None:
+        log.warning("YANDEX_BOT_TOKEN / YANDEX_CHAT_ID не заданы: уведомления пишутся в logs/notify.log")
+    return notify.make_handler(client, ROOT / "logs" / "notify.log")
+
+
+def _notify_topics() -> list[str]:
+    from ops import notify
+    return notify.TOPICS
+
+
 ROLES = {
-    "attrs": ("gluing-attrs", "sync.ozon.done", handler_attrs),
-    "plan": ("gluing-plan", "gluing.ozon.attrs_ready", handler_plan),
-    "apply": ("gluing-apply", "gluing.ozon.plan_ready", handler_apply),
+    "attrs": ("gluing-attrs", ["sync.ozon.done"], handler_attrs),
+    "plan": ("gluing-plan", ["gluing.ozon.attrs_ready"], handler_plan),
+    "apply": ("gluing-apply", ["gluing.ozon.plan_ready"], handler_apply),
+    "notify": ("gluing-notify", _notify_topics(), handler_notify),
 }
 
 
@@ -157,9 +207,9 @@ def main() -> int:
             print(bus.publish(a.topic, a.key, json.loads(a.payload), producer="cli"))
             return 0
         if a.role == "init":
-            for name, pattern, _ in ROLES.values():
-                bus.register(name, [pattern], max_attempts=3, visibility_sec=3600)
-                print("зарегистрирован", name, pattern)
+            for name, patterns, _ in ROLES.values():
+                bus.register(name, patterns, max_attempts=3 if name != "gluing-notify" else 8, visibility_sec=3600)
+                print("зарегистрирован", name, ", ".join(patterns))
             return 0
         if a.role == "status":
             for role, (name, _, _) in ROLES.items():
@@ -169,10 +219,12 @@ def main() -> int:
                     age = f", пульс {int((datetime.now() - datetime.fromisoformat(beat_file.read_text().strip())).total_seconds())} с назад"
                 print(name, bus.status(name), age)
             return 0
-        name, pattern, make = ROLES[a.role]
+        name, patterns, make = ROLES[a.role]
         router = Router()
-        router.on(pattern)(make(bus))
-        w = Worker(bus, name, router, max_attempts=3, visibility_sec=3600)
+        handler = make(bus)
+        for pattern in patterns:
+            router.on(pattern)(handler)
+        w = Worker(bus, name, router, max_attempts=3 if a.role != "notify" else 8, visibility_sec=3600)
         if a.loop:
             beat_file = ROOT / "logs" / f"heartbeat_{a.role}.txt"
             beat_file.parent.mkdir(exist_ok=True)
