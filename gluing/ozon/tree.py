@@ -232,7 +232,7 @@ def build(designs: list[Design], profile: dict, prev: dict | None = None):
             leaves = []
             rest2 = bds
             hard = typ in hard_types
-            kids = [d for d in rest2 if _in(d, child)]
+            kids = [d for d in rest2 if not d.size and _in(d, child)]    # у типов с размерностью «детское» определяет размер (ключ 1/2), не список дизайнов
             others = [d for d in rest2 if d not in kids]
             if kids and (hard or (want(f"{node}|{bname}|детские", len(kids)) and (len(others) >= mn or not others))):
                 note(node, f"детские в «{bname}»", "", len(kids), "отделены")

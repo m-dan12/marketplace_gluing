@@ -472,14 +472,23 @@ def test_other_bed_types_are_not_split_by_size():
     assert all("›" not in g.leaf for g in groups)
 
 
-def test_kpb_eco_and_kids_always_separate_even_when_few():
+def test_kpb_eco_always_separate_and_kids_are_defined_by_size_not_by_list():
     from gluing.lists import child_designs, eco_designs
     ecos = sorted(d for d in eco_designs() if len(d) == 4)[:3]
-    kids = sorted(d for d in child_designs() if len(d) <= 4 and d not in eco_designs())[:2]
-    sk = _plain(12) + [sku(f"PT{e}/4-13-26/1") for e in ecos] + [sku(f"PT{k}/4-13-26/1") for k in kids]
+    listed_kids = sorted(d for d in child_designs() if len(d) <= 4 and d not in eco_designs())[:2]
+    sk = _plain(12) + [sku(f"PT{e}/4-13-26/1") for e in ecos] + [sku(f"PT{k}/4-13-26/1") for k in listed_kids]         + _plain(3, 70500, "2-12-26") + _plain(2, 70600, "1-12-24")
     groups, log, _ = run_sized(sk)
     by = {g.leaf: len(g.designs) for g in groups}
-    assert by == {"Обычные › 1,5-сп": 12, "Обычные › Эко › 1,5-сп": 3, "Обычные › Детские › 1,5-сп": 2}, by
+    # дизайны из списка «детских» во взрослом размере остаются обычными; детские — только размеры 1 и 2
+    assert by == {"Обычные › 1,5-сп": 14, "Обычные › Эко › 1,5-сп": 3, "Обычные › Детский 1,5-сп": 3, "Обычные › Детский 1": 2}, by
     # без жёсткого правила (прежняя механика) те же дизайны остались бы в одной ветке
     groups_old, _, _ = run(sk)
     assert len({g.leaf for g in groups_old}) == 1
+
+
+def test_mix_brand_keeps_child_list_because_it_has_no_size_units():
+    from gluing.lists import child_designs
+    kids = sorted(d for d in child_designs() if len(d) <= 4)[:3]
+    sk = _plain(7, 70000, "4-13-26", "MT") + [sku(f"MT{k}/4-13-26/1") for k in kids]
+    groups, _, _ = run_sized(sk)
+    assert {g.leaf: len(g.designs) for g in groups} == {"Обычные": 7, "Обычные › Детские": 3}
