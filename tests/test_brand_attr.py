@@ -87,3 +87,39 @@ def test_recheck_marks_values_that_reverted_after_a_pause():
     r = out["result"]
     assert r.get("done", 0) == 0 and r["failed"] == 1 and r["слетело после повторной сверки"] == 1
     assert [x["status"] for x in j.rows("r")] == ["failed"] and "не закрепилось" in j.rows("r")[0]["error"]
+
+
+class LateOzon(FakeOzon):
+    """Принимает запись, но применяет её позже первой сверки (как Озон со снятием с модели): первое перечитывание видит старое."""
+
+    def __init__(self, cards):
+        super().__init__(cards)
+        self.pending, self.reads = {}, {}
+
+    def post(self, path, body):
+        if path == "/v1/product/attributes/update":
+            for it in body["items"]:
+                a = it["attributes"][0]
+                self.pending[it["offer_id"]] = (a["id"], a["values"][0]["value"])
+                self.reads[it["offer_id"]] = 0
+            res = {"task_id": len(self.tasks) + 1}
+            self.tasks[res["task_id"]] = [{"offer_id": it["offer_id"], "status": "imported", "errors": []} for it in body["items"]]
+            return res
+        if path == "/v4/product/info/attributes":
+            for o in body["filter"]["offer_id"]:
+                if o in self.pending:
+                    self.reads[o] += 1
+                    if self.reads[o] >= 2:                              # со второго перечитывания значение применено
+                        a, v = self.pending.pop(o)
+                        self.cards[o][a] = v
+        return super().post(path, body)
+
+
+def test_recheck_promotes_late_applied_values_to_done():
+    api = LateOzon({"o1": {MODEL_NAME_ATTR: "g_old"}})
+    j = MemoryJournal()
+    ops = [Op("skazka", "o1", "unglue_model", MODEL_NAME_ATTR, "g_old", "o1", "")]
+    out = execute("r", ops, {"skazka": api}, j, Settings(sleep=lambda s: None, recheck=120, probe=False))
+    r = out["result"]
+    assert r["done"] == 1 and r.get("failed", 0) == 0 and r["дозакрепилось при повторной сверке"] == 1
+    assert [x["status"] for x in j.rows("r")] == ["done"]

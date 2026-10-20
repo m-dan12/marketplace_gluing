@@ -175,19 +175,28 @@ def _apply_group(api: Api, rows: list[dict], attr_id: int, journal: Journal, st:
 
 
 def _recheck(run_id: str, op_ids: set[int], apis: dict[str, Api], journal: Journal, st: Settings) -> Counter:
-    """Озон иногда принимает запись, показывает новое значение и потом откатывает его. Через st.recheck секунд перечитываем всё
-    применённое: что не закрепилось, помечается failed (и вычитается из done)."""
+    """Озон применяет запись не мгновенно и иногда откатывает её. Через st.recheck секунд перечитываем всё применённое и то, что не
+    прошло первую сверку: не закрепившееся помечается failed (и вычитается из done), дозакрепившееся переводится в done."""
     out: Counter = Counter()
     if not st.recheck:
         return out
     st.sleep(st.recheck)
     by: dict[tuple, list[dict]] = {}
-    for r in journal.rows(run_id, "done"):
+    for r in journal.rows(run_id, "done") + [x for x in journal.rows(run_id, "failed") if x["error"].startswith("сверка")]:
         if r["op_id"] in op_ids:
             by.setdefault((r["account"], r["attr_id"]), []).append(r)
     for (acc, aid), rs in by.items():
         now = read_values(apis[acc], [r["offer_id"] for r in rs], aid)
         for r in rs:
+            if now.get(r["offer_id"]) == r["to_value"]:
+                if r["status"] == "failed":                      # прошла позже первой сверки
+                    journal.update(r["op_id"], "done", f"применилось позже первой сверки (проверено через {st.recheck} с)")
+                    out["done"] += 1
+                    out["failed"] -= 1
+                    out["дозакрепилось при повторной сверке"] += 1
+                continue
+            if r["status"] == "failed":
+                continue
             if now.get(r["offer_id"]) != r["to_value"]:
                 journal.update(r["op_id"], "failed", f"не закрепилось: через {st.recheck} с на Озоне «{now.get(r['offer_id'], '')}»")
                 out["done"] -= 1
