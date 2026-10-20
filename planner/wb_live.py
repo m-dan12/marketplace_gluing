@@ -13,8 +13,10 @@ def color_of(card: dict) -> str:
 
 
 def rows_from_cards(account: str, cards: list[dict]) -> list[tuple]:
-    return [(account, int(c["nmID"]), c.get("vendorCode") or "", int(c["imtID"]), c.get("subjectName"), c.get("brand"), c.get("title"),
-             color_of(c)) for c in cards if c.get("nmID") and c.get("imtID")]
+    """По одной строке на nmID: страницы выдачи WB могут перекрываться, берём последнюю версию карточки."""
+    by_nm = {int(c["nmID"]): c for c in cards if c.get("nmID") and c.get("imtID")}
+    return [(account, nm, c.get("vendorCode") or "", int(c["imtID"]), c.get("subjectName"), c.get("brand"), c.get("title"), color_of(c))
+            for nm, c in by_nm.items()]
 
 
 def refresh_wb_cards(conn, account: str, api: WbApi, cards: list[dict] | None = None) -> dict:

@@ -71,3 +71,11 @@ def test_other_cabinet_profile_has_no_lists_and_own_ruffle_brand():
     rows = [row(f"MY{i}/0-0-13/1", 1000 + i, brand="Milky Garden") for i in range(8)]
     prof, ld, res = make(rows, "wb_milky_garden")
     assert res.groups[0].bid == "ruffle"                    # у Milky Garden рюши — отдельная ветка
+
+
+def test_live_rows_deduplicate_overlapping_pages():
+    from planner.wb_live import rows_from_cards
+    cards = [{"nmID": 1, "imtID": 10, "vendorCode": "A", "characteristics": [{"name": "Цвет", "value": ["красный"]}]},
+             {"nmID": 1, "imtID": 11, "vendorCode": "A"}, {"nmID": 2, "imtID": 12, "vendorCode": "B"}, {"nmID": 3}]
+    rows = rows_from_cards("skazka", cards)
+    assert [(r[1], r[3]) for r in rows] == [(1, 11), (2, 12)]
