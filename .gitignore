@@ -5,3 +5,10 @@ fixtures/
 output/
 .env
 .pytest_cache/
+logs/
+out/
+state/
+*.out
+*.log
+wb_plan*.csv
+wb_groups*.csv
