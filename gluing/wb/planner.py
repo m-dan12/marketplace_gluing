@@ -77,7 +77,7 @@ def merge_tails(sets: dict[tuple, list[Card]], profile: dict) -> None:
     for key_, mem in sets.items():
         bid, rule, cat, br, key = key_
         fam = bid.split(":")[0]
-        if len(mem) < min_group and fam not in skip and bid not in mix:
+        if len(mem) < min_group and fam not in skip and fam not in mix:
             pools[(fam, cat, br)].append(key_)
     for (fam, cat, br), keys in pools.items():
         keys.sort(key=lambda k: _key_nums(sets[k]))
@@ -99,10 +99,10 @@ def merge_tails(sets: dict[tuple, list[Card]], profile: dict) -> None:
     for key_, mem in list(sets.items()):                         # остаток: присоединяем к ближайшему размеру с местом
         bid, rule, cat, br, key = key_
         fam = bid.split(":")[0]
-        if not (len(mem) < min_group and fam not in skip and bid not in mix):
+        if not (len(mem) < min_group and fam not in skip and fam not in mix):
             continue
         hosts = [k for k, m in sets.items() if k != key_ and k[2:4] == (cat, br) and k[0].split(":")[0] == fam.split(":")[0]
-                 and k[0] not in mix and len(m) >= min_group and len(m) + len(mem) <= work]
+                 and k[0].split(":")[0] not in mix and len(m) >= min_group and len(m) + len(mem) <= work]
         if hosts:
             host = min(hosts, key=lambda k: (_distance(_key_nums(sets[k]), _key_nums(mem)), k))
             merged = sets.pop(host) + sets.pop(key_)
@@ -121,7 +121,7 @@ def build_wb(cards: list[Card], live: dict[int, int], imt_members: dict[int, set
     sets: dict[tuple, list[Card]] = defaultdict(list)
     for k in cards:
         b = assign(k, ctx, order)
-        sets[(b.bid, b.rule, k.category, k.brand, "" if b.bid in mix_bids else size_key(k, profile))].append(k)
+        sets[(b.bid, b.rule, k.category, k.brand, "" if b.bid.split(":")[0] in mix_bids else size_key(k, profile))].append(k)
 
     moved: Counter = Counter()
     changed = True
@@ -129,7 +129,7 @@ def build_wb(cards: list[Card], live: dict[int, int], imt_members: dict[int, set
         changed = False
         for key_, mem in list(sets.items()):
             bid, rule, cat, br, key = key_
-            if bid in FALL and 0 < len(mem) < min_group:
+            if bid in FALL and key and 0 < len(mem) < min_group:         # key пуст у веток без деления по размеру: запасной ключ не из чего строить
                 nb = FALL[bid]
                 nbid, nrule = _fallback_rule(nb, cat, key) if nb else (f"key:{key}", f"Ключ {key}")
                 tgt = next((kk for kk in sets if kk[0] == nbid and kk[2:] == (cat, br, key)), (nbid, nrule, cat, br, key))

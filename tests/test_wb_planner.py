@@ -149,3 +149,16 @@ def test_tails_do_not_cross_category_or_brand():
     cards = [card(1000 + i, "0-0-20") for i in range(3)] + [card(2000 + i, "0-0-22", cat="Простыни") for i in range(3)] +             [card(3000 + i, "0-0-24", prefix="MT") for i in range(3)]
     res = run(cards, tails=True)
     assert len(res.groups) == 3 and not any(g.mixed for g in res.groups)
+
+
+def test_carnival_and_kant_are_not_split_by_size():
+    cards = [card(1000 + i, "104-116", cat="Карнавальные костюмы") for i in range(3)] +             [card(2000 + i, "116-128", cat="Карнавальные костюмы") for i in range(3)]
+    for c in cards:
+        c.title = "сарафан карнавальный"
+    res = run(cards)
+    assert len(res.groups) == 1 and res.groups[0].bid == "carnival:сарафаны" and res.groups[0].mixed
+    kant = [card(3000 + i, f"0-0-{20 + i}") for i in range(7)]
+    for c in kant:
+        c.article += "KANT"
+    res = run(kant)
+    assert len(res.groups) == 1 and res.groups[0].bid == "kant"

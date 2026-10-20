@@ -27,9 +27,9 @@ rhomb_first = ["44", "54"]             # ромбы: пододеяльники,
 order = ["carnival", "decor", "whole_category", "button", "kant", "rhomb", "eco_ruffle", "eco", "ruffle", "child", "generic"]
 
 # хвосты размеров: остатки меньше min_group объединяются с соседними размерами той же ветки, категории и бренда (смешение размеров допускается
-# только так); ветки из mix_sizes_bids не делятся по размеру совсем; семейства из no_mix_families не смешиваются никогда
+# только так); ветки из mix_sizes_bids (вся категория бренда, карнавал, декоративные наволочки, KANT: правила проекта не делят их по ключу) не делятся по размеру совсем; семейства из no_mix_families не смешиваются никогда
 merge_tails = true
-mix_sizes_bids = ["whole"]
+mix_sizes_bids = ["whole", "carnival", "decor", "kant"]
 no_mix_families = ["rhomb"]
 
 [solver]
