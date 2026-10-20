@@ -64,6 +64,9 @@ register("proftex-server", PERIODIC, "GluingSyncGate", PP, rf"{PY} ops\sync_gate
 register("proftex-server", WORKER, "GluingWorkerAttrs", PP, rf"{PY} ops\bus_worker.py attrs --loop >> logs\worker_attrs.log 2>&1",
          old=("GluingBusProftex",))
 register("proftex-server", WORKER, "GluingWorkerApply", PP, rf"{PY} ops\bus_worker.py apply --loop >> logs\worker_apply.log 2>&1")
+register("proftex-server", WORKER, "GluingWorkerNotify", PP, rf"{PY} ops\bus_worker.py notify --loop >> logs\worker_notify.log 2>&1")
+register("proftex-server", PERIODIC, "GluingHealth", PP, rf"{PY} ops\health_check.py >> logs\health.log 2>&1",
+         start="00:00", minutes=10, hours=23)
 
 LP = r"C:\Users\User_2\marketplace\gluing"
 LPY = r"C:\Users\User_2\marketplace\venv\Scripts\python.exe"
