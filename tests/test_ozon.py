@@ -492,3 +492,20 @@ def test_mix_brand_keeps_child_list_because_it_has_no_size_units():
     sk = _plain(7, 70000, "4-13-26", "MT") + [sku(f"MT{k}/4-13-26/1") for k in kids]
     groups, _, _ = run_sized(sk)
     assert {g.leaf: len(g.designs) for g in groups} == {"Обычные": 7, "Обычные › Детские": 3}
+
+
+def test_small_brands_of_a_family_share_a_glue_and_big_ones_do_not():
+    # пододеяльники: у Мечты 4 и у Сказки Сатин 3 дизайна, по отдельности меньше 6 → одна склейка «Мечта + Сказка Сатин»
+    sk = n_designs(4, DUV, 70000, "5-0-0", "MT") + n_designs(3, DUV, 70100, "5-0-0", "PC")
+    groups, log, _ = run_sized(sk)
+    assert [(g.brand, len(g.designs), g.kind) for g in groups] == [("Мечта + Сказка Сатин", 7, "склейка")]
+    assert any(x["level"] == "слияние малых брендов" for x in log)
+    # у Мечты хватает дизайнов на свою склейку: не сливается
+    sk = n_designs(8, DUV, 70000, "5-0-0", "MT") + n_designs(3, DUV, 70100, "5-0-0", "PC")
+    groups, _, _ = run_sized(sk)
+    assert {(g.brand, len(g.designs)) for g in groups} == {("Мечта", 8), ("Сказка Сатин", 3)}
+
+
+def test_pa_keeps_all_sizes_in_one_group():
+    groups, _, _ = run_sized(_plain(3, 70000, "4-13-26", "PA") + _plain(3, 70000, "5-13-26", "PA") + _plain(2, 70100, "6-13-26", "PA"))
+    assert len(groups) == 1 and groups[0].leaf == "Обычные" and len(groups[0].designs) == 5

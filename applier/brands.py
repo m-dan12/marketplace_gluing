@@ -13,9 +13,16 @@ BRAND_ATTRS = (BRAND_ATTR, BRAND_ATTR_CLOTHES)
 NO_BRAND = "нет бренда"           # Озон не отличает пустой бренд от «Нет бренда»: запись такого значения в пустое поле он пропускает (skipped)
 
 
-def load_brand_map(profile: dict) -> dict[str, str]:
+class BrandMap(dict):
+    """{бренд плана: бренд на Озоне}; prefixes — {префикс артикула: бренд плана} для групп из нескольких брендов («Мечта + Сказка Сатин»)."""
+    prefixes: dict[str, str] = {}
+
+
+def load_brand_map(profile: dict) -> BrandMap:
     """[ozon_brand] профиля: {бренд плана: значение бренда на Озоне}. Пусто — запись бренда выключена."""
-    return dict(profile.get("ozon_brand") or {})
+    m = BrandMap(profile.get("ozon_brand") or {})
+    m.prefixes = dict(profile.get("brands") or {})
+    return m
 
 
 def brand_attr_of(info: dict) -> int:

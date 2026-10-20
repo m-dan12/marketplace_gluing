@@ -163,3 +163,20 @@ def test_unified_design_color_becomes_set_color_name_and_twin_fix_overrides_it()
     p.checks.twins = [{"group_id": "g_1", "proposals": [{"design": "PT0", "offers": ["b"], "attr": "Название цвета", "new_value": "Classic 2"}]}]
     r2 = dry_run(p, live, ASP)
     assert {(o.offer_id, o.to_value) for o in r2.ops if o.op_type == "set_color_name"} == {("b", "Classic 2")}
+
+
+def test_composite_brand_group_uses_each_offers_prefix_brand():
+    from applier.brands import BrandMap
+    bm = BrandMap({"Мечта": "Мечта", "Сказка Сатин": "Сказка Сатин"})
+    bm.prefixes = {"MT": "Мечта", "PC": "Сказка Сатин"}
+    g = group("g_1", ["MT1/1", "PC2/1"], 2)
+    g.brand = "Мечта + Сказка Сатин"
+    live = {("skazka", "MT1/1"): {**live_item("A"), "brand_id": 7, "attrs": {**live_item("A")["attrs"], str(BRAND_ATTR): ["Мечта"]}},
+            ("skazka", "PC2/1"): {**live_item("B"), "brand_id": 8, "attrs": {**live_item("B")["attrs"], str(BRAND_ATTR): ["Сказка Сатин"]}}}
+    r = dry_run(plan([g]), live, ASP, brand_map=bm)
+    assert not r.blocked and not [o for o in r.ops if o.op_type == "set_brand"] and not r.warnings
+    # артикул с чужим префиксом блокирует группу, а не получает бренд наугад
+    g2 = group("g_2", ["XX1/1"], 1)
+    g2.brand = "Мечта + Сказка Сатин"
+    r2 = dry_run(plan([g2]), {("skazka", "XX1/1"): live_item("A")}, ASP, brand_map=bm)
+    assert r2.blocked

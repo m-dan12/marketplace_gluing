@@ -194,6 +194,17 @@ def build(designs: list[Design], profile: dict, prev: dict | None = None):
     for d in designs:
         nodes[(d.account, d.brand, d.typ)].append(d)
 
+    # Малые бренды одного семейства (profiles/ozon.toml, [brand_merge]) склеиваются между собой: если у бренда в типе меньше min_group
+    # дизайнов, он не соберёт свою склейку. Работает на уровне кабинета и типа; группа получает бренд «А + Б».
+    for fam in profile.get("brand_merge", {}).get("families", []):
+        for acc, typ in sorted({(a, t) for (a, b, t) in nodes if b in fam}):
+            small = sorted(b for b in fam if (acc, b, typ) in nodes and len({d.design for d in nodes[(acc, b, typ)]}) < mn)
+            if len(small) >= 2:
+                label = " + ".join(small)
+                nodes[(acc, label, typ)] = [d for b in small for d in nodes.pop((acc, b, typ))]
+                log.append({"node": f"{acc}|{typ}", "level": "слияние малых брендов", "name": label,
+                            "n": len(nodes[(acc, label, typ)]), "result": "склеиваются между собой"})
+
     for (acc, brand, typ), ds in sorted(nodes.items()):
         node = f"{acc}|{brand}|{typ}"
         branches: dict[str, list[Design]] = {"—": ds}

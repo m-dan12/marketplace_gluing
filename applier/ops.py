@@ -10,6 +10,7 @@ from dataclasses import dataclass, field
 
 from applier.brands import NO_BRAND, allowed_current, brand_attr_of, brand_ids, target_id
 from contract import Plan
+from gluing.parsing import parse_article
 from planner.twins import signature
 
 MODEL_NAME_ATTR = 9048          # «Название модели»: единое значение = одна склейка на Озоне
@@ -107,13 +108,24 @@ def dry_run(plan: Plan, live: dict[tuple[str, str], dict], aspects: dict,
         if g.n_designs > MAX_DESIGNS:
             reasons.append(f"{g.n_designs} дизайнов, больше {MAX_DESIGNS}")
         brand_ops: list[Op] = []
-        want = (brand_map or {}).get(g.brand)
-        if brand_map is not None and want is None:
+        composite = " + " in g.brand                          # группа из нескольких брендов плана: бренд каждого артикула по префиксу
+        prefixes = getattr(brand_map, "prefixes", {})
+
+        def want_of(k):
+            if not composite:
+                return (brand_map or {}).get(g.brand)
+            return (brand_map or {}).get(prefixes.get(parse_article(k[1])["prefix"], ""))
+
+        if brand_map is not None and not composite and g.brand not in brand_map:
             reasons.append(f"бренд плана «{g.brand}» не описан в [ozon_brand]")
-        elif want is not None:
+        elif brand_map is not None:
             for k in members:
                 if k not in live:
                     continue
+                want = want_of(k)
+                if want is None:
+                    reasons.append(f"бренд артикула {k[1]} не описан в [ozon_brand]")
+                    break
                 battr = brand_attr_of(live[k])
                 cur = _first(live[k]["attrs"], battr)
                 if cur.casefold() == want.casefold() or (not cur and want.casefold() == NO_BRAND):
@@ -127,9 +139,9 @@ def dry_run(plan: Plan, live: dict[tuple[str, str], dict], aspects: dict,
                     break
                 brand_ops.append(Op(k[0], k[1], "set_brand", battr, cur, want, g.group_id, live[k].get("product_id"),
                                     live[k].get("brand_id"), tid))
-        changed = {o.offer_id for o in brand_ops}
-        brands = {(want if k[1] in changed else _first(live[k]["attrs"], brand_attr_of(live[k]))) for k in members if k in live} - {""}
-        if len(brands) > 1:
+        changed = {o.offer_id: o.to_value for o in brand_ops}
+        brands = {(changed.get(k[1]) or _first(live[k]["attrs"], brand_attr_of(live[k]))) for k in members if k in live} - {""}
+        if len(brands) > 1 and not composite:
             out.warnings.append(f"{g.group_id}: в живых карточках несколько брендов {sorted(brands)}")
         # близнецы по живым атрибутам с учётом запланированных правок цвета
         sig_seen: dict[tuple, str] = {}
