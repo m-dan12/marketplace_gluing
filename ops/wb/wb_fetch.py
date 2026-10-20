@@ -1,8 +1,11 @@
 """Выгрузка WB Профтекс: карточки (content-api), остатки WB (seller-analytics) и FBS/DBS (marketplace-api), рулоны Селсапа."""
 from ops import ENV_PATH
+from ops.common import read_env, selsup_rolls
 import json, time, urllib.request, urllib.error, collections
-from ops.ozon import live_apply as A
-env = A.read_env(ENV_PATH); key = env["WB_API_KEY"]
+env = read_env(ENV_PATH); import os
+ACCT = os.environ.get("WB_ACCT", "proftex"); SFX = {"proftex": "", "milky": "_MILKY", "timeless": "_TIMELESS"}[ACCT]
+key = env["WB_API_KEY" + SFX]
+SUF = "" if ACCT == "proftex" else "_" + ACCT
 def call(url, body=None):
     for t in range(10):
         req = urllib.request.Request(url, data=json.dumps(body).encode() if body is not None else None, headers={"Authorization": key, "Content-Type": "application/json"})
@@ -17,7 +20,7 @@ while True:
     cards += r["cards"]
     if len(r["cards"]) < 100: break
     cur = {"limit": 100, "updatedAt": r["cursor"]["updatedAt"], "nmID": r["cursor"]["nmID"]}
-json.dump(cards, open("out/wb_cards.json", "w", encoding="utf-8"), ensure_ascii=False)
+json.dump(cards, open(f"out/wb_cards{SUF}.json", "w", encoding="utf-8"), ensure_ascii=False)
 items, off = [], 0
 while True:
     r = call("https://seller-analytics-api.wildberries.ru/api/analytics/v1/stocks-report/wb-warehouses", {"limit": 250000, "offset": off})["data"]["items"]
@@ -32,6 +35,6 @@ for w in [w["id"] for w in call("https://marketplace-api.wildberries.ru/api/v3/w
     for i in range(0, len(sk), 1000):
         ch = sk[i:i + 1000]; m = {b: n for n, b in ch}
         for x in call(f"https://marketplace-api.wildberries.ru/api/v3/stocks/{w}", {"skus": [b for _, b in ch]})["stocks"]: fbs[m[x["sku"]]] += x["amount"]
-rolls = A.selsup_rolls(env["SELSUP_API_TOKEN"])
-json.dump({"wb": dict(wb), "fbs": dict(fbs), "rolls": rolls}, open("out/wb_stocks.json", "w"))
+rolls = selsup_rolls(env["SELSUP_API_TOKEN"]) if ACCT == "proftex" else {}
+json.dump({"wb": dict(wb), "fbs": dict(fbs), "rolls": rolls}, open(f"out/wb_stocks{SUF}.json", "w"))
 print("карточек", len(cards), "| WB-остаток у", sum(v > 0 for v in wb.values()), "| FBS у", sum(v > 0 for v in fbs.values()), "| рулонов", len(rolls))
