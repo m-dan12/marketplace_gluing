@@ -40,7 +40,7 @@ Rule = Callable[[Card, Context], "Bucket | None"]
 def carnival(c: Card, x: Context):
     if c.category != x.p["carnival_category"]:
         return None
-    title = c.title.lower()
+    title = f"{c.title} {c.article}".lower()          # тип изделия бывает только в артикуле: PT5294/сарафан
     for stem, name in x.p["carnival_types"].items():
         if stem in title:
             return Bucket(c.brand, c.category, f"carnival:{name}", f"Карнавал — {name}", f"в названии «{stem}»")

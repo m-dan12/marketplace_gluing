@@ -26,11 +26,11 @@ def make(rows, name="wb_proftex"):
 
 def test_loader_brand_by_prefix_and_checks_against_wb_brand():
     rows = [row("PA6273/0-0-22/1", 1, brand="Сказка"), row("PA5929/0-0-26/1", 2, brand="Нет бренда"), row("PT1/0-0-26/1", 3, brand="Мечта!"),
-            row("ZZ9/0-0-26/1", 4), row("PT2/0-0-26/1", 5, stock=0), row("PT3/нет", 6)]
+            row("ZZ9/0-0-26/1", 4), row("PT2/0-0-26/1", 5, stock=0), row("PT3/нет", 6), row("ZZ8/0-0-26/1", 7, stock=0)]
     ld = load_cards(rows, ROLLS, load_profile("wb_proftex"))
     assert {c.nm_id: c.brand for c in ld.cards} == {1: "Анна Мария", 2: "Анна Мария", 3: "Сказка"}
     assert [m[0] for m in ld.brand_mismatch] == ["PA6273/0-0-22/1", "PA5929/0-0-26/1", "PT1/0-0-26/1"]
-    assert ld.skipped == {"неизвестный префикс": 1, "нет остатка": 1, "нет ключа в артикуле": 1}
+    assert ld.skipped == {"неизвестный префикс": 1, "нет остатка": 2, "нет ключа в артикуле": 1}   # неактивные неизвестные не считаются
 
 
 def test_fabric_cut_from_roll():
@@ -79,3 +79,13 @@ def test_live_rows_deduplicate_overlapping_pages():
              {"nmID": 1, "imtID": 11, "vendorCode": "A"}, {"nmID": 2, "imtID": 12, "vendorCode": "B"}, {"nmID": 3}]
     rows = rows_from_cards("skazka", cards)
     assert [(r[1], r[3]) for r in rows] == [(1, 11), (2, 12)]
+
+
+def test_carnival_without_key_is_glued_by_garment_type():
+    rows = [row(f"PT{i}/сарафан", 1000 + i, cat="Карнавальные костюмы") for i in range(7)] +            [row(f"PT{i}/юбка", 2000 + i, cat="Карнавальные костюмы") for i in range(7)]
+    prof, ld, res = make(rows)
+    assert not ld.no_key and not ld.skipped
+    assert sorted(g.bid for g in res.groups) == ["carnival:сарафаны", "carnival:юбки"]
+    groups = build_wb_groups("skazka", res, ld.live)
+    plan = assemble_plan(groups, {"skazka": prof}, {"skazka": ld}, run_id="r", engine_version="t", inputs={}, profile_name="p")
+    assert not plan.checks.hard_violations

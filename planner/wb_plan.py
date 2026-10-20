@@ -77,6 +77,8 @@ def assemble_plan(groups: list[Group], profiles: dict[str, dict], loaded: dict[s
                         f"например {a}: «{on_wb}» вместо «{by_prefix}»")
         if ld.no_live:
             warn.append(f"{acc}: у {len(ld.no_live)} активных карточек нет живого imtID (wb_card устарел), например {ld.no_live[0]}")
+        if ld.no_key:
+            warn.append(f"{acc}: {len(ld.no_key)} активных карточек без ключа размера не склеиваются, например {ld.no_key[0]}")
         if ld.unknown_prefix:
             warn.append(f"{acc}: {len(ld.unknown_prefix)} карточек с неизвестным префиксом не склеиваются, например {ld.unknown_prefix[0]}")
     return Plan(

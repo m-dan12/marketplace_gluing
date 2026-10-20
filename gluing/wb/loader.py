@@ -18,6 +18,7 @@ class Loaded:
     skipped: dict[str, int] = field(default_factory=dict)
     unknown_prefix: list[str] = field(default_factory=list)
     brand_mismatch: list[tuple[str, str, str]] = field(default_factory=list)   # (артикул, бренд по префиксу, бренд на WB)
+    no_key: list[str] = field(default_factory=list)   # активные карточки без ключа размера (кроме карнавальных)
     no_live: list[str] = field(default_factory=list)  # активные карточки без живого imtID
 
 
@@ -42,14 +43,8 @@ def load_cards(rows: list[dict], rolls: dict[str, int], profile: dict) -> Loaded
         art = (r["offer_id"] or "").strip()
         info = parse_article(art)
         brand = brand_for(info["prefix"])
-        if brand is None:
-            skip("неизвестный префикс")
-            out.unknown_prefix.append(art)
-            continue
-        if not info["key"]:
-            skip("нет ключа в артикуле")
-            continue
-        c = Card(article=art, nm_id=int(r["nm_id"]), title=r.get("title") or "", category=r.get("category") or "", brand=brand,
+        carnival = (r.get("category") or "") == profile["rules"]["carnival_category"]
+        c = Card(article=art, nm_id=int(r["nm_id"]), title=r.get("title") or "", category=r.get("category") or "", brand=brand or "",
                  prefix=info["prefix"], design=info["design"], key=info["key"], key_nums=info["key_nums"],
                  stock_wb=int(r.get("stock_wb") or 0), stock_fbs=int(r.get("stock_fbs") or 0), orders30=int(r.get("orders30") or 0))
         if c.category == fabric:
@@ -60,6 +55,14 @@ def load_cards(rows: list[dict], rolls: dict[str, int], profile: dict) -> Loaded
                 c.stock_roll = rolls[code] // c.roll_len_m
         if c.stock_total <= 0:
             skip("нет остатка")
+            continue
+        if brand is None:                                   # неактивные карточки в счёт не идут: склеивать нечего
+            skip("неизвестный префикс")
+            out.unknown_prefix.append(art)
+            continue
+        if not info["key"] and not carnival:                # у карнавальных костюмов ключа размера нет, ветка по типу изделия
+            skip("нет ключа в артикуле")
+            out.no_key.append(art)
             continue
         wb_brand = alias.get(r.get("wb_brand") or "", r.get("wb_brand") or "")
         if wb_brand and wb_brand != brand:
