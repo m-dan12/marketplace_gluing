@@ -119,6 +119,7 @@ class Settings:
     max_ops: int = 1500
     verify_pause: int = 30
     recheck: int = 120          # повторная сверка всех применённых значений через столько секунд (0 — выключена)
+    temp_value: bool = True     # при ответе Озона skipped писать цель через временное значение (только текстовые атрибуты)
     sleep: Callable = time.sleep
 
 
@@ -159,6 +160,14 @@ def _apply_group(api: Api, rows: list[dict], attr_id: int, journal: Journal, st:
         by = _write_batch(api, todo, attr_id, st)
         st.sleep(st.verify_pause)
         after = read_values(api, [r["offer_id"] for r in todo], attr_id)
+        stuck = [r for r in todo if by.get(r["offer_id"], {}).get("status") == "skipped" and after.get(r["offer_id"]) != r["to_value"]
+                 and not r.get("to_id")]
+        if stuck and st.temp_value:                          # Озон пропустил запись (сравнил с прежней версией): обход через временное значение
+            _write_batch(api, [{**r, "to_value": f"{r['to_value']}_{r['offer_id']}_tmp"} for r in stuck], attr_id, st)
+            st.sleep(st.verify_pause)
+            by.update(_write_batch(api, stuck, attr_id, st))
+            st.sleep(st.verify_pause)
+            after.update(read_values(api, [r["offer_id"] for r in stuck], attr_id))
         for r in todo:
             x = by.get(r["offer_id"], {})
             errs = "; ".join(str(e.get("message") or e) for e in x.get("errors", []))

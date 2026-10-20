@@ -123,3 +123,46 @@ def test_recheck_promotes_late_applied_values_to_done():
     r = out["result"]
     assert r["done"] == 1 and r.get("failed", 0) == 0 and r["дозакрепилось при повторной сверке"] == 1
     assert [x["status"] for x in j.rows("r")] == ["done"]
+
+
+class SkippingOzon(FakeOzon):
+    """Как Озон со «временными» значениями: прямая запись цели в такую карточку получает skipped и ничего не меняет,
+    а после записи любого другого значения следующая запись проходит."""
+
+    def __init__(self, cards, stuck):
+        super().__init__(cards)
+        self.stuck = set(stuck)
+
+    def post(self, path, body):
+        if path == "/v1/product/attributes/update":
+            tid = len(self.tasks) + 1
+            items = []
+            for it in body["items"]:
+                o, a = it["offer_id"], it["attributes"][0]
+                v = a["values"][0]["value"]
+                if o in self.stuck and not v.endswith("_tmp"):
+                    items.append({"offer_id": o, "status": "skipped", "errors": []})
+                else:
+                    self.cards[o][a["id"]] = v
+                    self.stuck.discard(o)
+                    items.append({"offer_id": o, "status": "imported", "errors": []})
+            self.tasks[tid] = items
+            return {"task_id": tid}
+        return super().post(path, body)
+
+
+def test_skipped_write_is_retried_through_a_temporary_value():
+    api = SkippingOzon({"o1": {MODEL_NAME_ATTR: "g_x_o1"}, "o2": {MODEL_NAME_ATTR: "old"}}, stuck=["o1"])
+    j = MemoryJournal()
+    ops = [Op("skazka", "o1", "set_model_name", MODEL_NAME_ATTR, "g_x_o1", "g_x", "g"),
+           Op("skazka", "o2", "set_model_name", MODEL_NAME_ATTR, "old", "g_x", "g")]
+    out = execute("r", ops, {"skazka": api}, j, Settings(sleep=lambda s: None, recheck=0, probe=False))
+    assert out["result"] == {"done": 2}
+    assert api.cards["o1"][MODEL_NAME_ATTR] == "g_x" and api.cards["o2"][MODEL_NAME_ATTR] == "g_x"
+
+
+def test_temporary_value_workaround_can_be_disabled():
+    api = SkippingOzon({"o1": {MODEL_NAME_ATTR: "g_x_o1"}}, stuck=["o1"])
+    ops = [Op("skazka", "o1", "set_model_name", MODEL_NAME_ATTR, "g_x_o1", "g_x", "g")]
+    out = execute("r", ops, {"skazka": api}, MemoryJournal(), Settings(sleep=lambda s: None, recheck=0, probe=False, temp_value=False))
+    assert out["result"] == {"failed": 1} and api.cards["o1"][MODEL_NAME_ATTR] == "g_x_o1"
