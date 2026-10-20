@@ -1,12 +1,17 @@
 """Применение плана WB (moveNm). Режимы: --probe <imtID|новая|...> одна группа; --all все группы. Логи в logs/wb-<stamp>/."""
 from ops import ENV_PATH, MERGE_ENV_PATH
-import csv, json, time, sys, urllib.request, urllib.error, collections, datetime as dt, argparse
+from ops.common import read_env
+import csv, json, time, urllib.request, urllib.error, collections, datetime as dt, argparse
 from pathlib import Path
-from ops.ozon import live_apply as A
-env = A.read_env(ENV_PATH); KEY = env["WB_API_KEY"]; MERGE = A.read_env(MERGE_ENV_PATH)["WB_MERGE_TOKEN_SK"]   # токен только для склеек (moveNm), чтение — обычным ключом
+
+env = read_env(ENV_PATH); import os
+ACCT = os.environ.get("WB_ACCT", "proftex"); SUF = "" if ACCT == "proftex" else "_" + ACCT
+SFX = {"proftex": "", "milky": "_MILKY", "timeless": "_TIMELESS"}[ACCT]; MT = {"proftex": "SK", "milky": "MG", "timeless": "TL"}[ACCT]
+CARDS = f"out/wb_cards{SUF}.json"
+KEY = env["WB_API_KEY" + SFX]; MERGE = read_env(MERGE_ENV_PATH)["WB_MERGE_TOKEN_" + MT]   # токен только для склеек (moveNm), чтение — обычным ключом
 ap = argparse.ArgumentParser(); ap.add_argument("--probe"); ap.add_argument("--all", action="store_true"); ap.add_argument("--apply", action="store_true")
-ap.add_argument("--plan", default="wb_plan_all.csv"); ap.add_argument("--skip-new", action="store_true"); a = ap.parse_args()
-stamp = dt.datetime.now().strftime("%Y%m%d-%H%M%S"); D = Path("logs") / f"wb-{stamp}"; D.mkdir(parents=True, exist_ok=True)
+ap.add_argument("--plan", default=None); ap.add_argument("--skip-new", action="store_true"); a = ap.parse_args()
+stamp = dt.datetime.now().strftime("%Y%m%d-%H%M%S"); D = Path("logs") / f"wb-{ACCT}-{stamp}"; D.mkdir(parents=True, exist_ok=True)
 log = open(D / "run.log", "w", encoding="utf-8")
 def L(*x):
     s = " ".join(str(i) for i in x); print(s, flush=True); log.write(s + "\n"); log.flush()
@@ -20,26 +25,27 @@ def call(path, body):
             raise RuntimeError(f"{path} HTTP {e.code}: {txt}")
 def imt_of(nms):
     out = {}
-    cards = json.load(open("out/wb_cards.json", encoding="utf-8"))
+    cards = json.load(open(CARDS, encoding="utf-8"))
     byvc = {c["nmID"]: c["vendorCode"] for c in cards}
     for nm in nms:
         r = call("/content/v2/get/cards/list", {"settings": {"cursor": {"limit": 10}, "filter": {"textSearch": byvc[nm], "withPhoto": -1}}})
         for c in r["cards"]:
             if c["nmID"] == nm: out[nm] = c["imtID"]
     return out
-plan = list(csv.DictReader(open(a.plan, encoding="utf-8-sig")))
+plan = list(csv.DictReader(open(a.plan or f"wb_plan_all{SUF}.csv", encoding="utf-8-sig")))
 json.dump({r["nmID"]: r["сейчас_imtID"] for r in plan}, open(D / "snapshot_before.json", "w"))
 groups = collections.defaultdict(list)
 for r in plan: groups[r["цель"]].append(r)
 todo = [g for g, m in groups.items() if any(r["действие"] == "перенести" for r in m)]
-if a.probe: todo = [a.probe]
+if a.probe:
+    if a.probe not in groups: raise SystemExit(f"группы {a.probe} нет в плане")
+    todo = [a.probe]
 todo = [g for g in todo if not (g.startswith("новая") and len(groups[g]) == 1)]
 if a.skip_new: todo = [g for g in todo if not g.startswith("новая")]
 L("групп к применению:", len(todo), "| режим:", "ПРИМЕНЕНИЕ" if a.apply else "СУХОЙ")
-ALL = json.load(open('out/wb_cards.json', encoding='utf-8'))
+ALL = json.load(open(CARDS, encoding='utf-8'))
 res = []; failed = []
 def do(g):
-    global res
     m = groups[g]; movers = [int(r["nmID"]) for r in m if r["действие"] == "перенести"]
     if g.startswith("новая"):
         seed = movers[0]; rest = movers[1:]

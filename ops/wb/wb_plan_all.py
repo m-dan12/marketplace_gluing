@@ -1,17 +1,23 @@
 """План склеек WB, весь кабинет Профтекс. Без записи. Логика в docs/wb_logic.md."""
-import csv, json, math, collections, tomllib, re, sys
+
+import csv, json, math, collections, tomllib, re, os
+ACCT = os.environ.get("WB_ACCT", "proftex"); SUF = "" if ACCT == "proftex" else "_" + ACCT
 from gluing.parsing import parse_article
 from gluing.brands import brand_for
 from gluing.rules import Context, assign
 from gluing.lists import eco_designs, child_designs
 from gluing.model import Card
-from datetime import datetime
 MAXG = 26   # рабочий лимит; запас до жёсткого лимита WB (30) под новые товары
 prof = tomllib.load(open("profiles/wb_proftex.toml", "rb")); MINg = prof["limits"]["min_group"]
 order = prof["rules"]["order"]
-ctx = Context(prof, eco_designs(), child_designs())
-raw = json.load(open("out/wb_cards.json", encoding="utf-8"))
-st = json.load(open("out/wb_stocks.json")); wb = {int(k): v for k, v in st["wb"].items()}; fbs = {int(k): v for k, v in st["fbs"].items()}; rolls = st["rolls"]
+if ACCT != "proftex":                                  # списки эко/детских и рюши-бренды ведутся только для Профтекса
+    prof["rules"]["ruffle_brands"] = ["Milky Garden", "Timeless", "TimeLess", "MILKY GARDEN"]
+    prof["rules"]["whole_category_brands"] = {}; prof["rules"]["no_eco_brands"] = []
+    ctx = Context(prof, frozenset(), frozenset())
+else:
+    ctx = Context(prof, eco_designs(), child_designs())
+raw = json.load(open(f"out/wb_cards{SUF}.json", encoding="utf-8"))
+st = json.load(open(f"out/wb_stocks{SUF}.json")); wb = {int(k): v for k, v in st["wb"].items()}; fbs = {int(k): v for k, v in st["fbs"].items()}; rolls = st["rolls"]
 CUT = re.compile(r"^1-(\d+)00220$")
 imt_members = collections.defaultdict(set)         # все карточки imtID, в т.ч. неактивные
 for c in raw: imt_members[c["imtID"]].add(c["nmID"])
@@ -77,7 +83,7 @@ for (bid, rule, cat, br, key), mem in sorted(sets.items(), key=lambda x: (-len(x
             cur = next(iter(k.flags))
             plan.append(dict(nmID=k.nm_id, артикул=k.article, предмет=cat, бренд=br, ветка=rule, ключ=key, остаток=k.stock_total, сейчас_imtID=cur, цель=gid,
                              действие="остаётся" if str(cur) == str(gid) else "перенести"))
-for name, rows in (("wb_plan_all.csv", plan), ("wb_groups_all.csv", groups)):
+for name, rows in ((f"wb_plan_all{SUF}.csv", plan), (f"wb_groups_all{SUF}.csv", groups)):
     w = csv.DictWriter(open(name, "w", encoding="utf-8-sig", newline=""), fieldnames=list(rows[0])); w.writeheader(); w.writerows(rows)
 sz = [g["карточек"] for g in groups]
 print("групп", len(groups), "| размер мин/макс", min(sz), max(sz), "| малых", sum(g["вид"] == "малая" for g in groups), "| одиночек", sum(s == 1 for s in sz))

@@ -10,3 +10,5 @@ out/
 state/
 *.out
 *.log
+wb_plan*.csv
+wb_groups*.csv
