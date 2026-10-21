@@ -143,3 +143,12 @@ def test_rollback_of_brand_without_old_id_goes_to_manual_list():
     execute("r", brand_ops(["o1"], frm="", fid=None), {"skazka": api}, j, ST)
     out = rollback("r", {"skazka": api}, j, ST)
     assert out["очистить вручную (прежнее значение пустое)"] == ["o1"]
+
+
+def test_trailing_spaces_in_live_value_do_not_count_as_a_change():
+    # планировщик читает значения без пробелов по краям; на Озоне «Мозаика » с пробелом — это то же значение, а не «изменилось с момента плана»
+    api, j = FakeOzon({"o0": {COLOR_NAME_ATTR: "Мозаика "}}), MemoryJournal()
+    ops = [Op("skazka", "o0", "set_color_name", COLOR_NAME_ATTR, "Мозаика", "Мозаика (компаньон)", "g", None)]
+    r = execute("r", ops, {"skazka": api}, j, ST)
+    assert r["result"] == {"done": 1}
+    assert api.cards["o0"][COLOR_NAME_ATTR] == "Мозаика (компаньон)"

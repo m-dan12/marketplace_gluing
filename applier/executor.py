@@ -99,7 +99,7 @@ def read_values(api: Api, offers: list[str], attr_id: int) -> dict[str, str]:
                      {"filter": {"offer_id": offers[i:i + BATCH], "visibility": "ALL"}, "limit": BATCH})
         for p in d.get("result") or []:
             vals = next((a["values"] for a in p.get("attributes") or [] if a["id"] == attr_id), [])
-            out[p["offer_id"]] = vals[0]["value"] if vals else ""
+            out[p["offer_id"]] = str(vals[0]["value"]).strip() if vals else ""       # как в снимке планировщика (planner/ozon_attrs): без пробелов по краям
     return out
 
 
