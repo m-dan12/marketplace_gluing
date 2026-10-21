@@ -29,3 +29,12 @@ def test_orders_lag_of_two_days_is_allowed_three_is_not():
     assert check(T, T, date(2026, 10, 18), T) == (True, [])
     ok, why = check(T, T, date(2026, 10, 17), T)
     assert not ok and "2026-10-18" in why[0]
+
+
+def test_wb_gate_fresh_and_stale():
+    from datetime import date, timedelta
+    from ops.sync_gate import check_wb
+    today = date(2026, 10, 21)
+    assert check_wb(today, today, today - timedelta(days=1), today) == (True, [])
+    ok, why = check_wb(today - timedelta(days=1), None, today - timedelta(days=3), today)
+    assert not ok and len(why) == 3 and "WB" in why[0] and "Селсапа" in why[1]

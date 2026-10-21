@@ -15,7 +15,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-BEAT_ROLES = ("attrs", "apply", "notify")          # у plan пульс лежит на laya-server и сюда не виден
+BEAT_ROLES = ("attrs", "apply", "notify", "wb")          # у plan пульс лежит на laya-server и сюда не виден
 BEAT_MAX_AGE = 300                                 # секунд
 SYNC_BY_HOUR = 9
 PLAN_BY_HOUR = 9
@@ -39,6 +39,10 @@ def alerts(s: dict, now: datetime) -> list[tuple[str, str]]:
         out.append(("no-sync", f"к {SYNC_BY_HOUR}:00 нет события «синк готов» за сегодня: db_sync не закончился или шлюз не сработал"))
     if now.hour >= PLAN_BY_HOUR and not s.get("plan_today", True):
         out.append(("no-plan", f"к {PLAN_BY_HOUR}:00 нет плана склеек за сегодня (laya-server или шина)"))
+    if now.hour >= SYNC_BY_HOUR and not s.get("sync_wb_today", True):
+        out.append(("no-sync-wb", f"к {SYNC_BY_HOUR}:00 нет события «синк WB готов» за сегодня: db_sync не закончился или шлюз не сработал"))
+    if now.hour >= PLAN_BY_HOUR and not s.get("plan_wb_today", True):
+        out.append(("no-plan-wb", f"к {PLAN_BY_HOUR}:00 нет плана склеек WB за сегодня (подписчик wb или шина)"))
     for run in s.get("apply_stuck") or []:
         out.append((f"apply-stuck-{run}", f"применение {run} идёт больше 3 часов без итога"))
     return out
@@ -56,10 +60,12 @@ def collect(bus_conn, data_conn, now: datetime) -> dict:
                                                          "where status='pending' and available_at < now() - interval '20 minutes' group by 1")}
     s["expired"] = dict(rows(bus_conn, "select consumer, count(*) from bus.delivery where status='running' and locked_until < now() group by 1"))
     s["sync_today"] = bool(rows(bus_conn, "select 1 from bus.event where topic='sync.ozon.done' and created_at::date = current_date limit 1"))
-    s["apply_stuck"] = [r[0] for r in rows(bus_conn, "select e.key from bus.event e where e.topic='gluing.ozon.apply_started' "
+    s["sync_wb_today"] = bool(rows(bus_conn, "select 1 from bus.event where topic='sync.wb.done' and created_at::date = current_date limit 1"))
+    s["apply_stuck"] = [r[0] for r in rows(bus_conn, "select e.key from bus.event e where e.topic in ('gluing.ozon.apply_started', 'gluing.wb.apply_started') "
                                                     "and e.created_at < now() - interval '3 hours' and e.created_at > now() - interval '2 days' "
-                                                    "and not exists (select 1 from bus.event a where a.topic='gluing.ozon.applied' and a.key = e.key)")]
+                                                    "and not exists (select 1 from bus.event a where a.topic in ('gluing.ozon.applied', 'gluing.wb.applied') and a.key = e.key)")]
     s["plan_today"] = bool(rows(data_conn, "select 1 from gluing.run where platform='ozon' and created_at::date = current_date limit 1"))
+    s["plan_wb_today"] = bool(rows(data_conn, "select 1 from gluing.run where platform='wb' and created_at::date = current_date limit 1"))
     beats = {}
     for role in BEAT_ROLES:
         f = ROOT / "logs" / f"heartbeat_{role}.txt"

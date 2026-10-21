@@ -13,9 +13,10 @@ from contract.models import Plan
 
 
 def evaluate_wb(plan: Plan, res: WbDryRun, status: str | None, snapshots: dict[str, str], today: date,
-                now: datetime | None = None, limits: dict | None = None) -> Report:
+                now: datetime | None = None, limits: dict | None = None, merge_accounts: set[str] | None = None) -> Report:
     """snapshots: wb_stock_snapshot, rolls_snapshot (даты), wb_live_at (когда перечитаны склейки с WB).
-    limits: max_blocked, max_age_days, max_live_age_min, max_ops."""
+    limits: max_blocked, max_age_days, max_live_age_min, max_ops. merge_accounts: кабинеты, у которых есть токен склеек (WB_MERGE_TOKEN);
+    None — не проверять (dry-run без записи)."""
     lim = {"max_blocked": 0, "max_age_days": 0, "max_live_age_min": 180, "max_ops": 1500, **(limits or {})}
     now = now or datetime.now(timezone.utc)
     r = Report(plan.run.run_id)
@@ -44,6 +45,11 @@ def evaluate_wb(plan: Plan, res: WbDryRun, status: str | None, snapshots: dict[s
     r.add(OK if mins <= lim["max_live_age_min"] else STOP, "свежесть: склейки WB (imtID)",
           f"перечитаны {live_at or 'никогда'}, {mins if mins < 10**6 else '—'} мин назад, допустимо {lim['max_live_age_min']}")
 
+    if merge_accounts is not None:
+        need = sorted({o.account for o in res.ops})
+        lack = [a for a in need if a not in merge_accounts]
+        r.add(OK if not lack else STOP, "токен склеек WB", "есть для " + ", ".join(need) if not lack else
+              "нет токена склеек (WB_MERGE_TOKEN_…) для кабинетов: " + ", ".join(lack))
     r.add(OK if not ck.hard_violations else STOP, "жёсткие нарушения плана",
           f"{len(ck.hard_violations)}" + ("; " + "; ".join(ck.hard_violations[:3]) if ck.hard_violations else ""))
     nb = len(res.blocked)

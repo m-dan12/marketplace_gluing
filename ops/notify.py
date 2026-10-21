@@ -14,24 +14,28 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 URL = "https://botapi.messenger.yandex.net/bot/v1/messages/sendText/"
-TOPICS = ["gluing.ozon.apply_started", "gluing.ozon.applied", "gluing.ozon.apply_blocked", "ops.alert"]
+TOPICS = ["gluing.ozon.apply_started", "gluing.ozon.applied", "gluing.ozon.apply_blocked",
+          "gluing.wb.apply_started", "gluing.wb.applied", "gluing.wb.apply_blocked", "ops.alert"]
 log = logging.getLogger("notify")
 
 
 def render(topic: str, p: dict) -> str | None:
     """Текст сообщения по событию; None — событие не для уведомления."""
     run = p.get("run_id", "")
+    wb = ".wb." in topic
+    topic = topic.replace(".wb.", ".ozon.")                      # тексты одни, меняется только площадка
+    plat, shop = ("WB", "WB") if wb else ("Озона", "Озон")
     if topic == "gluing.ozon.apply_started":
         by = ", ".join(f"{k}: {v}" for k, v in (p.get("summary", {}).get("по типам") or {}).items())
-        return (f"Склейки Озона: запускаю применение плана {run}.\nОпераций: {p.get('ops')} ({by}).\n"
+        return (f"Склейки {plat}: запускаю применение плана {run}.\nОпераций: {p.get('ops')}" + (f" ({by})" if by else "") + ".\n"
                 f"Проверки пройдены, предупреждений: {len(p.get('warns') or [])}.")
     if topic == "gluing.ozon.applied":
         if not p.get("ops"):
-            return f"Склейки Озона: изменений не нужно, все склейки сходятся (план {run}, артикулов {p.get('members', '')})."
+            return f"Склейки {plat}: изменений не нужно, все склейки сходятся (план {run}, артикулов {p.get('members', '')})."
         r = p.get("result") or {}
         bad = r.get("failed", 0) + r.get("skipped", 0)
         head = "применён полностью" if not bad and not p.get("stopped") else "применён с замечаниями"
-        lines = [f"Склейки Озона: план {run} {head}.", f"Выполнено: {r.get('done', 0)} из {p.get('ops')}."]
+        lines = [f"Склейки {plat}: план {run} {head}.", f"Выполнено: {r.get('done', 0)} из {p.get('ops')}."]
         if bad:
             lines.append(f"Не прошло: {bad} (журнал gluing.op, статус failed/skipped).")
         if r.get("слетело после повторной сверки"):
@@ -41,7 +45,7 @@ def render(topic: str, p: dict) -> str | None:
         return "\n".join(lines)
     if topic == "gluing.ozon.apply_blocked":
         why = "\n".join(f"- {x}" for x in (p.get("reasons") or [])[:8])
-        return f"Склейки Озона: автоприменение плана {run} остановлено, на Озон ничего не записано.\nПричины:\n{why}"
+        return f"Склейки {plat}: автоприменение плана {run} остановлено, на {shop} ничего не записано.\nПричины:\n{why}"
     if topic == "ops.alert":
         return f"Склейки: {p.get('text', 'проблема')}"
     return None

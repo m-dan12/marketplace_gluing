@@ -70,3 +70,15 @@ def test_without_credentials_writes_log_and_does_not_fail(tmp_path):
     make_handler(None, f)(ev("gluing.ozon.dryrun_ready", {}))          # не для уведомления: молча пропускаем
     with pytest.raises(ValueError):
         Yandex("", chat_id="")
+
+
+def test_wb_texts_name_the_platform():
+    from ops.notify import TOPICS, render
+    assert "gluing.wb.applied" in TOPICS
+    t = render("gluing.wb.applied", {"run_id": "r", "ops": 10, "result": {"done": 10}})
+    assert "Склейки WB" in t and "Озон" not in t
+    b = render("gluing.wb.apply_blocked", {"run_id": "r", "reasons": ["токен склеек WB: нет"]})
+    assert "на WB ничего не записано" in b and "токен склеек" in b
+    s = render("gluing.wb.apply_started", {"run_id": "r", "ops": 5, "summary": {}, "warns": []})
+    assert "Склейки WB" in s and "()" not in s
+    assert "Склейки Озона" in render("gluing.ozon.applied", {"run_id": "r", "ops": 1, "result": {"done": 1}})

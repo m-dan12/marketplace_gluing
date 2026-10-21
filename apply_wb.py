@@ -20,7 +20,7 @@ from datetime import date
 import psycopg
 
 from applier.executor import PgJournal
-from applier.wb_client import WbPort, api_for, read_env_files
+from applier.wb_client import WbPort, api_for, merge_accounts, read_env_files
 from applier.wb_executor import WbSettings, execute_wb, rollback_wb
 from applier.wb_ops import WbDryRun, dry_run_wb
 from applier.wb_preflight import evaluate_wb, render_wb
@@ -112,8 +112,12 @@ def main() -> None:
         res = check_plan_wb(conn, plan)
         res.ops = [o for o in res.ops if o.account in accounts]
         # согласованный (approved) и частично применённый (partial) план проверяется как черновик
+        merge_accs = None
+        if a.execute:
+            _, menv0 = read_env_files(a.env, a.merge_env)
+            merge_accs = merge_accounts(menv0)
         rep = evaluate_wb(plan, res, "draft" if status in ("draft", "approved", "partial") else status, snapshots_now(conn, plan), date.today(),
-                          limits={"max_ops": a.max_ops})
+                          limits={"max_ops": a.max_ops}, merge_accounts=merge_accs)
         print(f"план {rid}, статус {status}; режим: {'ЗАПИСЬ' if a.execute else 'dry-run, на WB ничего не отправляется'}")
         print(render_wb(rep))
         for b in res.blocked[:15]:
@@ -140,7 +144,25 @@ def main() -> None:
         print(json.dumps(out, ensure_ascii=False, indent=1, default=str))
         r = out.get("result", {})
         ok = r.get("done", 0) == sum(r.values()) and not out.get("stopped")
-        store.set_status(rid, "applied" if ok else ("failed" if out.get("stopped") else "partial"), a.by or "apply")
+        status_after = "applied" if ok else ("failed" if out.get("stopped") else "partial")
+        store.set_status(rid, status_after, a.by or "apply")
+        publish_applied(rid, res, out, status_after)
+
+
+def publish_applied(rid: str, res, out: dict, status: str) -> None:
+    """Итог применения в шину (для уведомлений); сбой шины не должен ронять применение."""
+    try:
+        from busclient import PgBus
+        from ops.bus_worker import bus_url
+        bus = PgBus(bus_url())
+        try:
+            bus.publish("gluing.wb.applied", key=rid, payload={
+                "run_id": rid, "status": status, "ops": len(res.ops), "result": out.get("result", {}),
+                "stopped": out.get("stopped"), "summary": res.summary(), "members": res.members}, producer="apply_wb")
+        finally:
+            bus.close()
+    except Exception as e:                                           # noqa: BLE001
+        print("итог в шину не опубликован:", e)
 
 
 if __name__ == "__main__":

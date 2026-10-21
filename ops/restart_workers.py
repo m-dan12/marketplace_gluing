@@ -13,7 +13,7 @@ import sys
 
 CFG = "C:/MainFolder/sshdata/config"
 HOSTS = {
-    "proftex": ("proftex-server", ["GluingWorkerAttrs", "GluingWorkerApply", "GluingWorkerNotify"], False),
+    "proftex": ("proftex-server", ["GluingWorkerAttrs", "GluingWorkerApply", "GluingWorkerNotify", "GluingWorkerWb"], False),
     "laya": ("laya-server", ["GluingWorkerPlan"], True),
 }
 

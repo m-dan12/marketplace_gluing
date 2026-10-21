@@ -63,3 +63,12 @@ def test_hard_violations_and_ops_limit_stop():
     p.checks.hard_violations.append("g: несколько размеров")
     assert lv(ev(p, LIVE))["жёсткие нарушения плана"] == "stop"
     assert lv(ev(pl(group("g", [1, 2, 3], 10)), LIVE, limits={"max_ops": 0}))["объём операций"] == "stop"
+
+
+def test_missing_merge_token_blocks_only_when_writing():
+    p = pl(group("g", [1, 2, 3], 10))
+    assert lv(evaluate_wb(p, dry_run_wb(p, LIVE), "draft", SNAPS, TODAY, NOW))["свежесть: остатки WB"] == "ok"
+    no_token = evaluate_wb(p, dry_run_wb(p, LIVE), "draft", SNAPS, TODAY, NOW, merge_accounts=set())
+    assert not no_token.go and lv(no_token)["токен склеек WB"] == "stop"
+    with_token = evaluate_wb(p, dry_run_wb(p, LIVE), "draft", SNAPS, TODAY, NOW, merge_accounts={"skazka"})
+    assert with_token.go and lv(with_token)["токен склеек WB"] == "ok"

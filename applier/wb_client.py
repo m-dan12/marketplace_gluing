@@ -79,6 +79,11 @@ def merge_env_path(explicit: str = "") -> Path | None:
     return Path(p) if p else None
 
 
+def merge_accounts(merge_env: dict[str, str]) -> set[str]:
+    """Кабинеты, для которых в файле токенов склеек есть токен."""
+    return {acc for acc, (_, mk) in ACCOUNT_ENV.items() if merge_env.get(mk)}
+
+
 def list_cards(api: WbApi) -> list[dict]:
     """Все карточки кабинета (nmID, imtID, vendorCode, subjectName, brand, title)."""
     cards: list[dict] = []

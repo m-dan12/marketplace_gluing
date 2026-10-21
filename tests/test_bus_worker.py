@@ -80,3 +80,87 @@ def test_as_of_from_key_or_today():
     assert bus_worker.as_of_of(ev) == "2026-10-19"
     ev = types.SimpleNamespace(payload={}, key="manual-run")
     assert len(bus_worker.as_of_of(ev)) == 10
+
+
+# ---------- WB: три стадии одного подписчика ----------
+
+def wb_setup(monkeypatch):
+    bus = MemoryBus()
+    for role in bus_worker.ROLES:
+        name, patterns, _ = bus_worker.ROLES[role]
+        bus.register(name, patterns)
+    return bus
+
+
+def test_wb_chain_live_then_plan_then_apply_blocked_without_tokens(monkeypatch):
+    bus = wb_setup(monkeypatch)
+    calls = []
+    monkeypatch.setitem(sys.modules, "plan_wb", types.SimpleNamespace(
+        run_plan=lambda as_of, dry=False, **kw: calls.append((as_of, dry)) or {"run_id": f"{as_of}-wb", "saved": not dry, "groups": 400,
+                                                                                  "hard_violations": []}))
+    bus.publish("sync.wb.done", "2026-10-21", {"as_of": "2026-10-21", "dry": True})
+    w = make_worker(bus, "wb")
+    assert w.run_once() == 1                                   # dry: склейки не читаем, событие идёт дальше
+    assert w.run_once() == 1                                   # gluing.wb.live_ready -> план
+    assert calls == [("2026-10-21", True)]
+    assert w.run_once() == 1                                   # gluing.wb.plan_ready (dry) -> проверка пропущена
+    assert bus.status("gluing-wb") == {"done": 3}
+
+
+def test_wb_stages_are_idempotent_on_redelivery(monkeypatch):
+    bus = wb_setup(monkeypatch)
+    calls = []
+    monkeypatch.setitem(sys.modules, "plan_wb", types.SimpleNamespace(
+        run_plan=lambda as_of, dry=False, **kw: calls.append(as_of) or {"run_id": f"{as_of}-wb", "groups": 1}))
+    bus.publish("gluing.wb.live_ready", "2026-10-21", {"as_of": "2026-10-21"})
+    ev = bus.claim("gluing-wb", "w")[0]
+    h = bus_worker.handler_wb(bus)
+    h(ev)
+    h(ev)
+    assert calls == ["2026-10-21"]
+
+
+def test_wb_apply_stage_blocks_and_publishes_reasons(monkeypatch):
+    """Нет токена склеек: запись не стартует, в шину уходит apply_blocked с причиной."""
+    import psycopg
+    from applier.wb_ops import WbDryRun
+    from contract import Design, Group, Member, Plan, RunInfo
+    bus = wb_setup(monkeypatch)
+    plan = Plan(run=RunInfo(run_id="2026-10-21-wb", platform="wb", created_at="x", engine_version="t", profile_name="p",
+                            profile_hash="h", inputs={"as_of": "2026-10-21"}),
+                groups=[Group(group_id="g", key="k", account="skazka", brand="B", type="T", branch="b", kind="glue",
+                              designs=[Design(design="1", members=[Member(offer_id="A1", platform_ids={"nm_id": 1})])])])
+
+    class Conn:
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+
+    class Store:
+        def __init__(self, conn): pass
+        def load(self, rid): return plan
+        def status(self, rid): return "draft"
+        def set_status(self, *a): raise AssertionError("запись не должна стартовать")
+
+    from applier.ops import Op
+    res = WbDryRun(run_id="2026-10-21-wb")
+    res.ops = [Op("skazka", "A1", "move_nm", 0, "5", "10", "g", 1)]
+    from datetime import date
+    today = date.today().isoformat()
+    monkeypatch.setattr(psycopg, "connect", lambda *a, **k: Conn())
+    monkeypatch.setitem(sys.modules, "plan_ozon", types.SimpleNamespace(database_url=lambda: "x"))
+    monkeypatch.setitem(sys.modules, "apply_wb", types.SimpleNamespace(
+        check_plan_wb=lambda conn, plan: res,
+        snapshots_now=lambda conn, plan: {"wb_stock_snapshot": today, "rolls_snapshot": today,
+                                          "wb_live_at": __import__("datetime").datetime.now().astimezone().isoformat()}))
+    monkeypatch.setitem(sys.modules, "planner.store", types.SimpleNamespace(PgStore=Store))
+    monkeypatch.setattr(bus_worker, "conf", lambda name: "")
+    monkeypatch.setitem(sys.modules, "applier.wb_client", types.SimpleNamespace(
+        merge_accounts=lambda env: set(), read_env_files=lambda a, b: ({}, {})))
+    from ops import apply_runner
+    monkeypatch.setattr(apply_runner, "is_running", lambda task=None: False)
+    bus.publish("gluing.wb.plan_ready", "2026-10-21", {"run_id": "2026-10-21-wb", "as_of": today})
+    h = bus_worker.handler_wb(bus)
+    h(bus.claim("gluing-wb", "w")[0])
+    ev = bus.claim("gluing-notify", "n", 10)
+    assert [e.topic for e in ev] == ["gluing.wb.apply_blocked"]
+    assert any("токен склеек" in r for r in ev[0].payload["reasons"])

@@ -11,6 +11,7 @@ import subprocess
 import sys
 
 CFG = "C:/MainFolder/sshdata/config"
+ONLY = set(sys.argv[1:])            # имена заданий: python ops/register_tasks.py GluingWorkerWb; без аргументов — все
 
 COMMON = r"""
 $ErrorActionPreference = 'Stop'
@@ -47,6 +48,8 @@ $settings = New-ScheduledTaskSettingsSet -StartWhenAvailable -MultipleInstances 
 
 
 def register(host, template, name, work, cmd, old=(), start="05:10", minutes=10, hours=6):
+    if ONLY and name not in ONLY:
+        return
     ps = (template.replace("@NAME@", name).replace("@WORK@", work).replace("@CMD@", cmd.replace("'", "''"))
           .replace("@START@", start).replace("@MIN@", str(minutes)).replace("@HOURS@", str(hours))
           .replace("@OLD@", ",".join(f"'{o}'" for o in old)))
@@ -64,6 +67,8 @@ register("proftex-server", PERIODIC, "GluingSyncGate", PP, rf"{PY} ops\sync_gate
 register("proftex-server", WORKER, "GluingWorkerAttrs", PP, rf"{PY} ops\bus_worker.py attrs --loop >> logs\worker_attrs.log 2>&1",
          old=("GluingBusProftex",))
 register("proftex-server", WORKER, "GluingWorkerApply", PP, rf"{PY} ops\bus_worker.py apply --loop >> logs\worker_apply.log 2>&1")
+register("proftex-server", PERIODIC, "GluingSyncGateWb", PP, rf"{PY} ops\sync_gate.py --platform wb >> logs\gate_wb.log 2>&1")
+register("proftex-server", WORKER, "GluingWorkerWb", PP, rf"{PY} ops\bus_worker.py wb --loop >> logs\worker_wb.log 2>&1")
 register("proftex-server", WORKER, "GluingWorkerNotify", PP, rf"{PY} ops\bus_worker.py notify --loop >> logs\worker_notify.log 2>&1")
 register("proftex-server", PERIODIC, "GluingHealth", PP, rf"{PY} ops\health_check.py >> logs\health.log 2>&1",
          start="00:00", minutes=10, hours=23)
