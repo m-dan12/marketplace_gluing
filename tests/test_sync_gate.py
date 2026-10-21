@@ -23,3 +23,9 @@ def test_missing_values_block_with_reasons():
 def test_old_orders_block():
     ok, why = check(T, T, date(2026, 10, 17), T)
     assert not ok and "заказ" in why[0]
+
+
+def test_orders_lag_of_two_days_is_allowed_three_is_not():
+    assert check(T, T, date(2026, 10, 18), T) == (True, [])
+    ok, why = check(T, T, date(2026, 10, 17), T)
+    assert not ok and "2026-10-18" in why[0]
