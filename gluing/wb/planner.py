@@ -15,6 +15,7 @@ from dataclasses import dataclass
 
 from gluing.model import Card
 from gluing.rules import Context, assign
+from gluing.wb import cpsat
 
 FALL = {"eco_ruffle": "ruffle", "ruffle": None, "eco": None, "child": None, "kant": None}   # куда уходит малая ветка
 
@@ -70,7 +71,8 @@ def size_id(key_: tuple) -> str:
     return "|".join((key_[0], *key_[2:]))
 
 
-def merge_tails(sets: dict[tuple, list[Card]], profile: dict, prev_sizes: frozenset[str] | set[str] = frozenset()) -> set[str]:
+def merge_tails(sets: dict[tuple, list[Card]], profile: dict, prev_sizes: frozenset[str] | set[str] = frozenset(),
+                use_solver: bool = False) -> set[str]:
     """Размер — такой же этап деления, как остальные: размер отделяется в свою группу при >= size_split_up карточек, а если вчера
     был отделён, удерживается, пока карточек >= size_merge_down (гистерезис, как у Озона). Остальные размеры — хвосты: они объединяются
     с соседними размерами той же ветки, категории и бренда; остаток меньше min_group присоединяется к ближайшему размеру, где есть
@@ -83,6 +85,7 @@ def merge_tails(sets: dict[tuple, list[Card]], profile: dict, prev_sizes: frozen
     skip = set(r.get("no_mix_families", ["rhomb"])) | {"carnival"}
     mix = set(r.get("mix_sizes_bids", []))
     separated: set[str] = set()
+    use_solver = use_solver and cpsat.available()
     pools: dict[tuple, list[tuple]] = defaultdict(list)
     for key_, mem in sets.items():
         bid, rule, cat, br, key = key_
@@ -106,6 +109,17 @@ def merge_tails(sets: dict[tuple, list[Card]], profile: dict, prev_sizes: frozen
             size += len(sets[k])
         if len(bins) > 1 and sum(len(sets[k]) for k in bins[-1]) < min_group and                 sum(len(sets[k]) for b in bins[-2:] for k in b) <= work:
             bins[-2] += bins.pop()
+        if use_solver and len(keys) > 1:                         # CP-SAT: те же хвосты, но разброс размеров в группе — в целевой функции
+            solved = cpsat.solve_tails([(k[4], sets[k]) for k in keys], profile, [[(k[4], len(sets[k])) for k in b] for b in bins])
+            if solved:
+                first = keys[0]
+                for k in keys:
+                    del sets[k]
+                for g in solved:
+                    labels = [lab for lab, _ in g]
+                    key = "+".join(labels)
+                    sets[(f"{fam}:tails", f"{first[1]} — хвосты размеров", cat, br, key)] = [c for _, cs in g for c in cs]
+                continue
         for b in bins:
             if len(b) > 1:
                 merged = [c for k in b for c in sets.pop(k)]
@@ -126,7 +140,7 @@ def merge_tails(sets: dict[tuple, list[Card]], profile: dict, prev_sizes: frozen
 
 
 def build_wb(cards: list[Card], live: dict[int, int], imt_members: dict[int, set[int]], profile: dict, ctx: Context,
-             prev_sizes: frozenset[str] | set[str] = frozenset()) -> WbBuild:
+             prev_sizes: frozenset[str] | set[str] = frozenset(), solver: str | None = None) -> WbBuild:
     """cards — активные карточки с остатком (бренд по префиксу, ключ не пустой); live — {nm_id: текущий imtID};
     imt_members — {imtID: все nm_id в склейке на WB, в том числе неактивные и вне плана}."""
     lim = profile["limits"]
@@ -157,7 +171,10 @@ def build_wb(cards: list[Card], live: dict[int, int], imt_members: dict[int, set
                 changed = True
                 break
 
-    separated = merge_tails(sets, profile, prev_sizes) if profile["rules"].get("merge_tails", False) else None
+    sv = profile.get("solver", {})
+    mode = solver or sv.get("mode", "greedy")                           # "cpsat" | "greedy"; нет ortools или он не работает: жадный
+    use_solver = mode == "cpsat" and cpsat.available()
+    separated = merge_tails(sets, profile, prev_sizes, use_solver) if profile["rules"].get("merge_tails", False) else None
 
     planned = {k.nm_id for k in cards}
     members = {i: set(v) for i, v in imt_members.items()}
@@ -200,7 +217,16 @@ def build_wb(cards: list[Card], live: dict[int, int], imt_members: dict[int, set
         used.update(i for i in slots if i)
         load = [0] * len(slots)
         where: dict[int, int] = {}
+        if use_solver and len(slots) >= 2 and not grown:                # CP-SAT: раскладка по частям с липкостью к живым склейкам
+            room = [work - residual(s) if s else work for s in slots]
+            asg = cpsat.solve_parts(mem, room, [slots.index(live.get(k.nm_id)) if live.get(k.nm_id) in slots else None for k in mem],
+                                    min_group, sv.get("weights_parts"), sv.get("time_limit", 10))
+            if asg is not None:
+                where = {k.nm_id: j for k, j in zip(mem, asg)}
+        solved_parts = bool(where)
         for k in sorted(mem, key=lambda k: (-k.stock_total, k.article)):
+            if solved_parts:
+                break
             cur = live.get(k.nm_id)
             i = slots.index(cur) if cur in slots else None
             if i is None or load[i] >= caps[i]:
