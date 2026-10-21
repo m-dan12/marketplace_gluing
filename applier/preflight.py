@@ -71,7 +71,11 @@ def evaluate(plan: Plan, res: DryRun, status: str | None, snapshots: dict[str, s
     color_ops = [o for o in res.ops if o.op_type == "set_color_name"]
     twin_groups = {t.get("group_id") for t in ck.twins}
     fixed_by = {o.group_id for o in color_ops}
-    unresolved = [g for g in twin_groups if g not in fixed_by]
+    # правка уже может стоять на Озоне (после вчерашнего применения операции не нужны): группа решена, если у неё есть предложение
+    # правки и сама проверка по живым атрибутам её не заблокировала («близнецы после правок»)
+    proposed = {t.get("group_id") for t in ck.twins if t.get("proposals")}
+    blocked_ids = {b.group_id for b in res.blocked}
+    unresolved = [g for g in twin_groups if g not in fixed_by and not (g in proposed and g not in blocked_ids)]
     r.add(OK if not unresolved else (WARN if len(unresolved) <= lim.get("max_unresolved_twins", 0) else STOP),
           "близнецы без правки цвета", f"групп с близнецами {len(twin_groups)}, из них без правки цвета {len(unresolved)}")
     if twin_groups:

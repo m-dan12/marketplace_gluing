@@ -93,3 +93,12 @@ def test_brand_ops_without_dictionary_id_stop():
     good = _Op("skazka", "A1", "set_brand", 85, "", "Сказка", "g1", None, None, 115857500)
     rep = evaluate(plan(), run_of(good), "draft", SNAPS, TODAY)
     assert levels(rep)["бренд: у операций есть id справочника"] == "ok" and "бренд: замены" in levels(rep)
+
+
+def test_twins_with_proposal_already_applied_live_are_ok_unless_group_is_blocked():
+    tw = [{"group_id": "g1", "group_key": "k", "designs": ["d1"], "color": "Бисер", "same_design": True,
+           "proposals": [{"design": "d1", "offers": ["A2"], "attr": "Название цвета", "new_value": "Бисер 2"}]}]
+    applied = evaluate(plan(twins=tw), run_of(op()), "draft", SNAPS, TODAY)             # правка уже на Озоне: операций нет
+    assert levels(applied)["близнецы без правки цвета"] == "ok"
+    blocked = evaluate(plan(twins=tw), run_of(op(), blocked=[Blocked("g1", ["близнецы после правок: A1 и A2"])]), "draft", SNAPS, TODAY)
+    assert levels(blocked)["близнецы без правки цвета"] == STOP

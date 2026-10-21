@@ -34,6 +34,8 @@ def main() -> None:
     ap.add_argument("--type", default="Комплект постельного белья")
     a = ap.parse_args()
     eco, kids = eco_designs(), child_designs()
+    import tomllib
+    mix_brands = set(tomllib.load(open(ROOT / "profiles" / "ozon.toml", "rb")).get("sizes", {}).get("mix_brands", []))
     with psycopg.connect(database_url()) as conn:
         store = PgStore(conn)
         plan = store.load(a.run) if a.run else store.last("ozon")
@@ -45,7 +47,11 @@ def main() -> None:
             continue
         sizes = Counter(size_of(m.offer_id) for d in g.designs for m in d.members)
         n_eco = sum(any(c in eco for c in design_candidates(d.design.lstrip("ABCDEFGHIJKLMNOPQRSTUVWXYZ"))) for d in g.designs)
-        n_kid = sum(any(c in kids for c in design_candidates(d.design.lstrip("ABCDEFGHIJKLMNOPQRSTUVWXYZ"))) for d in g.designs)
+        # «детское» у КПБ с размерностью — по размеру карточки (ключ 1/2), у брендов без деления по размеру — по списку дизайнов
+        if any(b in mix_brands for b in g.brand.split(" + ")):
+            n_kid = sum(any(c in kids for c in design_candidates(d.design.lstrip("ABCDEFGHIJKLMNOPQRSTUVWXYZ"))) for d in g.designs)
+        else:
+            n_kid = sum(any(size_of(m.offer_id) in ("1", "2") for m in d.members) for d in g.designs)
         t = tot[(g.account, g.brand)]
         t["групп"] += 1
         t["дизайнов"] += g.n_designs
