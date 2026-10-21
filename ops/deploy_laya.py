@@ -1,6 +1,6 @@
 """Выкладка кода на laya-server без git: git archive -> zip -> scp -> распаковка.
 
-    python ops/deploy_laya.py                 # проект склеек + marketplace_bus (если лежит рядом) и установка в venv
+    python ops/deploy_laya.py                 # проект склеек + eventbus (если лежит рядом) и установка в venv
     python ops/deploy_laya.py --no-install    # только код
 
 Каталоги на laya-server: C:\\Users\\User_2\\marketplace\\gluing, ...\\bus, venv ...\\venv. .env не трогается.
@@ -17,7 +17,7 @@ CONFIG = "C:/MainFolder/sshdata/config"
 SSH = ["ssh", "-F", CONFIG, "laya-server"]
 BASE = r"C:\Users\User_2\marketplace"
 HERE = Path(__file__).resolve().parent.parent
-BUS = HERE.parent / "marketplace_bus"
+BUS = HERE.parent / "eventbus"
 
 # Приёмный скрипт кладётся на laya-server файлом (вложенные кавычки cmd/PowerShell ненадёжны) и запускается с именем проекта.
 RECEIVER = r"""param($name)

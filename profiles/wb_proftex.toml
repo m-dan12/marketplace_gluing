@@ -35,6 +35,10 @@ mix_sizes_bids = ["whole", "carnival", "decor", "kant"]
 no_mix_families = ["rhomb"]
 
 [solver]
+# mode: "cpsat" — решатель (хвосты размеров и раскладка по частям, gluing/wb/cpsat.py); "greedy" — жадный. Нет ortools или он падает на процессоре
+# (proftex-server) — автоматически жадный; поэтому план считается на laya-server.
+mode = "cpsat"
+time_limit = 10
 deterministic_limit = 25   # лимит поиска на пару бренд+категория (условные единицы, результат повторяем)
 workers = 8
 gap = 0.01

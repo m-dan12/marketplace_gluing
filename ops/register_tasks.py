@@ -75,5 +75,7 @@ register("proftex-server", PERIODIC, "GluingHealth", PP, rf"{PY} ops\health_chec
 
 LP = r"C:\Users\User_2\marketplace\gluing"
 LPY = r"C:\Users\User_2\marketplace\venv\Scripts\python.exe"
+register("laya-server", WORKER, "GluingWorkerWbPlan", LP,
+         rf"{LPY} ops\laya_run.py -- {LPY} ops\bus_worker.py wbplan --loop >> logs\worker_wbplan.log 2>&1")
 register("laya-server", WORKER, "GluingWorkerPlan", LP,
          rf"{LPY} ops\laya_run.py -- {LPY} ops\bus_worker.py plan --loop >> logs\worker_plan.log 2>&1", old=("GluingBusPlan",))

@@ -13,9 +13,10 @@ from pathlib import Path
 
 CFG = "C:/MainFolder/sshdata/config"
 PROJ = r"C:\Proftex-Server\marketplace_gluing"
-BUSDIR = r"C:\Proftex-Server\marketplace_bus"
+BUSDIR = r"C:\Proftex-Server\eventbus"
 PY = PROJ + r"\.venv\Scripts\python.exe"
-BUS = Path(__file__).resolve().parent.parent.parent / "marketplace_bus"
+_ROOT = Path(__file__).resolve().parent.parent.parent
+BUS = _ROOT / "eventbus"
 
 
 def ssh(cmd: str, timeout: int = 300) -> None:

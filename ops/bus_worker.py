@@ -183,9 +183,10 @@ def _notify_topics() -> list[str]:
 
 # Попыток доставки до статуса dead (паузы 30·2^(n−1) с, до часа). Для WB больше: сбой API площадки обычно проходит за час, а dead требует
 # ручного разбора; уведомления тоже повторяются дольше.
-ATTEMPTS = {"gluing-wb": 8, "gluing-notify": 8}
+ATTEMPTS = {"gluing-wb": 8, "gluing-wbplan": 8, "gluing-notify": 8}
 
-WB_TOPICS = ["sync.wb.done", "gluing.wb.live_ready", "gluing.wb.plan_ready"]
+WB_TOPICS = ["sync.wb.done", "gluing.wb.plan_ready"]            # proftex: чтение WB и применение
+WB_PLAN_TOPICS = ["gluing.wb.live_ready"]                        # laya: расчёт плана (CP-SAT на proftex-server падает)
 
 
 def _wb_live(bus):
@@ -278,8 +279,12 @@ def _wb_apply(bus):
     return guard(h)
 
 
+def handler_wbplan(bus):
+    return _wb_plan(bus)
+
+
 def handler_wb(bus):
-    stages = {"sync.wb.done": _wb_live(bus), "gluing.wb.live_ready": _wb_plan(bus), "gluing.wb.plan_ready": _wb_apply(bus)}
+    stages = {"sync.wb.done": _wb_live(bus), "gluing.wb.plan_ready": _wb_apply(bus)}
 
     def h(ev):
         return stages[ev.topic](ev)
@@ -288,6 +293,7 @@ def handler_wb(bus):
 
 ROLES = {
     "wb": ("gluing-wb", WB_TOPICS, handler_wb),
+    "wbplan": ("gluing-wbplan", WB_PLAN_TOPICS, handler_wbplan),
     "attrs": ("gluing-attrs", ["sync.ozon.done"], handler_attrs),
     "plan": ("gluing-plan", ["gluing.ozon.attrs_ready"], handler_plan),
     "apply": ("gluing-apply", ["gluing.ozon.plan_ready"], handler_apply),

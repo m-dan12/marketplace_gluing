@@ -101,10 +101,11 @@ def test_wb_chain_live_then_plan_then_apply_blocked_without_tokens(monkeypatch):
     bus.publish("sync.wb.done", "2026-10-21", {"as_of": "2026-10-21", "dry": True})
     w = make_worker(bus, "wb")
     assert w.run_once() == 1                                   # dry: склейки не читаем, событие идёт дальше
-    assert w.run_once() == 1                                   # gluing.wb.live_ready -> план
+    wp = make_worker(bus, "wbplan")
+    assert wp.run_once() == 1                                  # gluing.wb.live_ready -> план (на laya)
     assert calls == [("2026-10-21", True)]
     assert w.run_once() == 1                                   # gluing.wb.plan_ready (dry) -> проверка пропущена
-    assert bus.status("gluing-wb") == {"done": 3}
+    assert bus.status("gluing-wb") == {"done": 2} and bus.status("gluing-wbplan") == {"done": 1}
 
 
 def test_wb_stages_are_idempotent_on_redelivery(monkeypatch):
@@ -113,8 +114,8 @@ def test_wb_stages_are_idempotent_on_redelivery(monkeypatch):
     monkeypatch.setitem(sys.modules, "plan_wb", types.SimpleNamespace(
         run_plan=lambda as_of, dry=False, **kw: calls.append(as_of) or {"run_id": f"{as_of}-wb", "groups": 1}))
     bus.publish("gluing.wb.live_ready", "2026-10-21", {"as_of": "2026-10-21"})
-    ev = bus.claim("gluing-wb", "w")[0]
-    h = bus_worker.handler_wb(bus)
+    ev = bus.claim("gluing-wbplan", "w")[0]
+    h = bus_worker.handler_wbplan(bus)
     h(ev)
     h(ev)
     assert calls == ["2026-10-21"]

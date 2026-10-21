@@ -23,7 +23,7 @@ def card(design: int, key: str = "0-0-26", nm: int | None = None, stock: int = 5
     return c
 
 
-def run(cards, live=None, members=None, tails=False, up=6, down=None, prev=frozenset()):
+def run(cards, live=None, members=None, tails=False, up=6, down=None, prev=frozenset(), solver="greedy"):
     """up/down — пороги отделения размера (по умолчанию 6: размер отделяется, когда карточек не меньше min_group)."""
     prof = {**PROFILE, "rules": {**PROFILE["rules"], "merge_tails": tails, "size_split_up": up, "size_merge_down": down or up}}
     live = live or {}
@@ -31,7 +31,7 @@ def run(cards, live=None, members=None, tails=False, up=6, down=None, prev=froze
     for c in cards:
         if c.nm_id in live:
             members.setdefault(live[c.nm_id], set()).add(c.nm_id)
-    return build_wb(cards, live, members, prof, CTX, prev)
+    return build_wb(cards, live, members, prof, CTX, prev, solver=solver)
 
 
 def sizes(res):
@@ -181,3 +181,39 @@ def test_size_hysteresis_keeps_yesterdays_separate_size_until_merge_down():
     assert sorted(len(g.cards) for g in held.groups) == [7, 8] or len(held.groups) == 2
     dropped = run(cards[1:], tails=True, up=10, down=8, prev={"key:0-0-26|Наволочки|Сказка|0-0-26"})   # 7 < 8: сливаем
     assert len(dropped.groups) == 1
+
+
+# ---------- CP-SAT: те же ограничения, что у жадного режима ----------
+import pytest  # noqa: E402
+
+from gluing.wb import cpsat  # noqa: E402
+
+needs_solver = pytest.mark.skipif(not cpsat.available(), reason="CP-SAT недоступен на этой машине")
+
+
+@needs_solver
+def test_cpsat_parts_respect_limits_and_stickiness():
+    cards = [card(1000 + i) for i in range(40)]
+    live = {c.nm_id: (7 if i < 20 else 8) for i, c in enumerate(cards)}      # две живые склейки по 20
+    res = run(cards, live=live, solver="cpsat")
+    assert sorted(len(g.cards) for g in res.groups) == [20, 20]
+    assert {g.imt_id for g in res.groups} == {7, 8}
+    assert all(live[c.nm_id] == g.imt_id for g in res.groups for c in g.cards)       # никто не переехал
+
+
+@needs_solver
+def test_cpsat_is_deterministic_and_never_exceeds_work_limit():
+    cards = [card(1000 + i, k) for i, k in enumerate(["0-0-20"] * 4 + ["0-0-22"] * 3 + ["0-0-24"] * 5 + ["0-0-26"] * 4 + ["0-0-28"] * 6)]
+    a = run(cards, tails=True, solver="cpsat", up=10)
+    b = run(list(reversed(cards)), tails=True, solver="cpsat", up=10)
+    key = lambda r: sorted(tuple(sorted(c.nm_id for c in g.cards)) for g in r.groups)
+    assert key(a) == key(b)
+    assert max(len(g.cards) for g in a.groups) <= 26 and sum(len(g.cards) for g in a.groups) == len(cards)
+
+
+@needs_solver
+def test_cpsat_tails_not_worse_than_greedy_on_group_count():
+    cards = [card(1000 + 10 * j + i, f"0-0-{20 + 2 * j}") for j in range(6) for i in range(4 + j % 3)]
+    g = run(cards, tails=True, solver="greedy", up=10)
+    s = run(cards, tails=True, solver="cpsat", up=10)
+    assert len(s.groups) <= len(g.groups)
