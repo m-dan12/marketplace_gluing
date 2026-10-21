@@ -67,6 +67,7 @@ def main() -> None:
     ap.add_argument("--accounts", default="", help="через запятую: skazka,milky_garden,timeless")
     ap.add_argument("--max-ops", type=int, default=1500)
     ap.add_argument("--no-probe", dest="probe", action="store_false")
+    ap.add_argument("--resume", action="store_true", help="продолжить прерванное применение (статус applying): сделает только остаток")
     a = ap.parse_args()
 
     with psycopg.connect(database_url(), autocommit=True) as conn:
@@ -116,7 +117,7 @@ def main() -> None:
         if a.execute:
             _, menv0 = read_env_files(a.env, a.merge_env)
             merge_accs = merge_accounts(menv0)
-        rep = evaluate_wb(plan, res, "draft" if status in ("draft", "approved", "partial") else status, snapshots_now(conn, plan), date.today(),
+        rep = evaluate_wb(plan, res, "draft" if status in ("draft", "approved", "partial", "applying") else status, snapshots_now(conn, plan), date.today(),
                           limits={"max_ops": a.max_ops}, merge_accounts=merge_accs)
         print(f"план {rid}, статус {status}; режим: {'ЗАПИСЬ' if a.execute else 'dry-run, на WB ничего не отправляется'}")
         print(render_wb(rep))
@@ -128,7 +129,7 @@ def main() -> None:
                            "ops": [asdict(o) for o in res.ops], "blocked": [asdict(b) for b in res.blocked]}, f, ensure_ascii=False, indent=1)
         if not a.execute:
             return
-        if status not in ("approved", "partial"):          # partial: повторный запуск после обрыва делает только остаток
+        if status not in ("approved", "partial") and not (a.resume and status == "applying"):    # остальное делает повторный запуск
             raise SystemExit(f"запись только для согласованного плана (статус {status}): сначала --approve --by <имя>")
         if a.confirm != rid:
             raise SystemExit(f"для записи повторите run_id: --confirm {rid}")

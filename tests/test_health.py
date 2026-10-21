@@ -30,3 +30,29 @@ def test_morning_checks_only_after_deadline_hour():
     s = {**OK, "sync_today": False, "plan_today": False}
     assert kinds(s, NIGHT) == set()
     assert kinds(s, MORNING) == {"no-sync", "no-plan"}
+
+
+def test_orphan_runs_and_resume_are_bounded(monkeypatch):
+    from ops import apply_runner, bus_worker, health_check
+
+    class Cur:
+        def __init__(self): self.q = ""
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+        def execute(self, q, args=None): self.q, self.args = q, args
+        def fetchall(self): return [("2026-10-21-wb",)] if "apply_started" in self.q else []
+        def fetchone(self): return (1,)
+
+    class Conn:
+        def cursor(self): return Cur()
+
+    assert health_check.orphan_runs(Conn(), task_running=True) == []                 # задание живо: возобновлять нечего
+    runs = health_check.orphan_runs(Conn(), task_running=False)
+    assert runs == [("2026-10-21-wb", 1)]
+    started, published = [], []
+    monkeypatch.setattr(apply_runner, "start_wb", lambda *a, **k: started.append((a, k)))
+    monkeypatch.setattr(bus_worker, "conf", lambda name: "x")
+    bus = type("B", (), {"publish": lambda self, topic, key, payload, producer: published.append(key)})()
+    assert health_check.resume_wb(bus, runs) == ["2026-10-21-wb"]
+    assert started[0][1] == {"resume": True} and published == ["wb-resume:2026-10-21-wb:2"]
+    assert health_check.resume_wb(bus, [("r", health_check.MAX_RESUMES)]) == []     # лимит возобновлений исчерпан

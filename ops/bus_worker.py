@@ -181,6 +181,10 @@ def _notify_topics() -> list[str]:
     return notify.TOPICS
 
 
+# Попыток доставки до статуса dead (паузы 30·2^(n−1) с, до часа). Для WB больше: сбой API площадки обычно проходит за час, а dead требует
+# ручного разбора; уведомления тоже повторяются дольше.
+ATTEMPTS = {"gluing-wb": 8, "gluing-notify": 8}
+
 WB_TOPICS = ["sync.wb.done", "gluing.wb.live_ready", "gluing.wb.plan_ready"]
 
 
@@ -310,7 +314,7 @@ def main() -> int:
             return 0
         if a.role == "init":
             for name, patterns, _ in ROLES.values():
-                bus.register(name, patterns, max_attempts=3 if name != "gluing-notify" else 8, visibility_sec=3600)
+                bus.register(name, patterns, max_attempts=ATTEMPTS.get(name, 3), visibility_sec=3600)
                 print("зарегистрирован", name, ", ".join(patterns))
             return 0
         if a.role == "status":
@@ -326,7 +330,7 @@ def main() -> int:
         handler = make(bus)
         for pattern in patterns:
             router.on(pattern)(handler)
-        w = Worker(bus, name, router, max_attempts=3 if a.role != "notify" else 8, visibility_sec=3600)
+        w = Worker(bus, name, router, max_attempts=ATTEMPTS.get(name, 3), visibility_sec=3600)
         if a.loop:
             beat_file = ROOT / "logs" / f"heartbeat_{a.role}.txt"
             beat_file.parent.mkdir(exist_ok=True)

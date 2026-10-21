@@ -77,6 +77,41 @@ def collect(bus_conn, data_conn, now: datetime) -> dict:
     return s
 
 
+RESUME_AFTER_MIN = 20          # применение WB без итога дольше этого и без живого задания считается оборванным
+MAX_RESUMES = 3                # возобновлений на один план
+
+
+def orphan_runs(bus_conn, task_running: bool) -> list[tuple[str, int]]:
+    """Планы WB, где применение стартовало, итога нет, задание не идёт: [(run_id, сколько раз уже возобновляли)]."""
+    if task_running:
+        return []
+    with bus_conn.cursor() as cur:
+        cur.execute("select e.key from bus.event e where e.topic='gluing.wb.apply_started' "
+                    "and e.created_at < now() - make_interval(mins => %s) and e.created_at > now() - interval '2 days' "
+                    "and not exists (select 1 from bus.event a where a.topic in ('gluing.wb.applied') and a.key = e.key)", (RESUME_AFTER_MIN,))
+        keys = [r[0] for r in cur.fetchall()]
+        out = []
+        for k in keys:
+            cur.execute("select count(*) from bus.event where topic='ops.alert' and key like %s", (f"wb-resume:{k}:%",))
+            out.append((k, cur.fetchone()[0]))
+    return out
+
+
+def resume_wb(bus, runs: list[tuple[str, int]]) -> list[str]:
+    """Перезапускает оборванное применение WB (apply_wb --resume делает только остаток); больше MAX_RESUMES раз не пробует."""
+    from ops import apply_runner
+    from ops.bus_worker import conf
+    done = []
+    for rid, n in runs:
+        if n >= MAX_RESUMES:
+            continue
+        bus.publish("ops.alert", key=f"wb-resume:{rid}:{n + 1}", payload={
+            "kind": "wb-resume", "text": f"применение плана WB {rid} оборвалось, возобновляю (попытка {n + 1} из {MAX_RESUMES})"}, producer="health")
+        apply_runner.start_wb(rid, conf("MARKETPLACE_ENV"), conf("MARKETPLACE_MERGE_ENV"), 1500, resume=True)
+        done.append(rid)
+    return done
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--print", dest="only_print", action="store_true")
@@ -94,6 +129,18 @@ def main() -> int:
         print("ПРОБЛЕМА:", kind, "-", text)
     if not found:
         print("всё в порядке")
+    if not a.only_print:
+        from ops import apply_runner
+        with psycopg.connect(bus_url()) as bc:
+            orphans = orphan_runs(bc, apply_runner.is_running(apply_runner.WB_TASK_NAME))
+            bc.rollback()
+        if orphans:
+            bus = PgBus(bus_url())
+            try:
+                for rid in resume_wb(bus, orphans):
+                    print("возобновлено применение WB:", rid)
+            finally:
+                bus.close()
     if found and not a.only_print:
         bus = PgBus(bus_url())
         try:

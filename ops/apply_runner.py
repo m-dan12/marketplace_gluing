@@ -50,8 +50,9 @@ def start(run_id: str, keys_env: str, max_ops: int, only: str = "", script: str 
     return _ps(SCRIPT.replace("@CMD@", cmd).replace("@WORK@", str(ROOT)).replace("@NAME@", task))
 
 
-def start_wb(run_id: str, keys_env: str, merge_env: str, max_ops: int) -> str:
-    return start(run_id, keys_env, max_ops, script="apply_wb.py", extra=f" --merge-env {merge_env}" if merge_env else "", task=WB_TASK_NAME)
+def start_wb(run_id: str, keys_env: str, merge_env: str, max_ops: int, resume: bool = False) -> str:
+    extra = (f" --merge-env {merge_env}" if merge_env else "") + (" --resume" if resume else "")
+    return start(run_id, keys_env, max_ops, script="apply_wb.py", extra=extra, task=WB_TASK_NAME)
 
 
 def is_running(task: str = TASK_NAME) -> bool:
