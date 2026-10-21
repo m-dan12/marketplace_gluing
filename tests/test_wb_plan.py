@@ -55,7 +55,7 @@ def test_plan_from_rows_validates_and_roundtrips():
 
 
 def test_mixed_sizes_in_one_group_is_hard_violation():
-    rows = [row(f"PT{i}/0-0-26/1", 1000 + i) for i in range(8)] + [row(f"PT{i}/0-0-20/1", 2000 + i) for i in range(8)]
+    rows = [row(f"PT{i}/0-0-26/1", 1000 + i) for i in range(10)] + [row(f"PT{i}/0-0-20/1", 2000 + i) for i in range(10)]
     prof, ld, res = make(rows)
     groups = build_wb_groups("skazka", res, ld.live)
     # ломаем план вручную: переносим карточку другого размера в чужую группу

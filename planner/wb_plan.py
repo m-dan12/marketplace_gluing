@@ -69,7 +69,7 @@ def build_wb_groups(account: str, build: WbBuild, live: dict[int, int]) -> list[
 
 
 def assemble_plan(groups: list[Group], profiles: dict[str, dict], loaded: dict[str, Loaded], *, run_id: str, engine_version: str,
-                  inputs: dict, profile_name: str) -> Plan:
+                  inputs: dict, profile_name: str, state: dict | None = None) -> Plan:
     hard: list[str] = []
     warn: list[str] = []
     for acc, prof in profiles.items():
@@ -91,4 +91,4 @@ def assemble_plan(groups: list[Group], profiles: dict[str, dict], loaded: dict[s
         run=RunInfo(run_id=run_id, platform="wb", engine_version=engine_version, profile_name=profile_name,
                     profile_hash=profile_hash(profiles), inputs=inputs, mode="shadow",
                     created_at=datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")),
-        groups=groups, checks=Check(hard_violations=hard, warnings=warn))
+        groups=groups, checks=Check(hard_violations=hard, warnings=warn), state=state or {})

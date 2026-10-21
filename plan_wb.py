@@ -31,12 +31,15 @@ def run_plan(as_of: str, dry: bool = False, accounts: list[str] | None = None, j
     with psycopg.connect(database_url()) as conn:
         store = PgStore(conn)
         rolls = read_rolls(conn)
-        groups, loaded, inputs = [], {}, {"as_of": as_of}
+        prev = store.last("wb")                                    # вчерашнее состояние гистерезиса размеров (теневой режим: любой статус)
+        prev_sizes = (prev.state or {}).get("wb_sizes", {}) if prev else {}
+        groups, loaded, inputs, sizes_state = [], {}, {"as_of": as_of}, {}
         for acc in accounts:
             prof = profiles[acc]
             rows = read_wb_rows(conn, acc, as_of, prof.get("stock", {}).get("wb_mode", "all_physical"))
             ld = load_cards(rows, rolls, prof)
-            res = build_wb(ld.cards, ld.live, read_imt_members(conn, acc), prof, context_for(prof))
+            res = build_wb(ld.cards, ld.live, read_imt_members(conn, acc), prof, context_for(prof), set(prev_sizes.get(acc, [])))
+            sizes_state[acc] = sorted(res.separated or [])
             groups += build_wb_groups(acc, res, ld.live)
             loaded[acc] = ld
             kinds = Counter(s.kind for s in res.groups)
@@ -50,7 +53,7 @@ def run_plan(as_of: str, dry: bool = False, accounts: list[str] | None = None, j
             n += 1
             run_id = f"{as_of}-wb-{n}"
         plan = assemble_plan(groups, profiles, loaded, run_id=run_id, engine_version=engine_version(), inputs=inputs,
-                             profile_name="+".join(CABINETS[a] for a in accounts))
+                             profile_name="+".join(CABINETS[a] for a in accounts), state={"wb_sizes": sizes_state})
         print(f"жёстких нарушений: {len(plan.checks.hard_violations)}; предупреждений: {len(plan.checks.warnings)}")
         for w in plan.checks.warnings[:8]:
             print("  ", w[:200])

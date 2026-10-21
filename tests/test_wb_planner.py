@@ -23,14 +23,15 @@ def card(design: int, key: str = "0-0-26", nm: int | None = None, stock: int = 5
     return c
 
 
-def run(cards, live=None, members=None, tails=False):
-    prof = {**PROFILE, "rules": {**PROFILE["rules"], "merge_tails": tails}}
+def run(cards, live=None, members=None, tails=False, up=6, down=None, prev=frozenset()):
+    """up/down — пороги отделения размера (по умолчанию 6: размер отделяется, когда карточек не меньше min_group)."""
+    prof = {**PROFILE, "rules": {**PROFILE["rules"], "merge_tails": tails, "size_split_up": up, "size_merge_down": down or up}}
     live = live or {}
     members = members or {}
     for c in cards:
         if c.nm_id in live:
             members.setdefault(live[c.nm_id], set()).add(c.nm_id)
-    return build_wb(cards, live, members, prof, CTX)
+    return build_wb(cards, live, members, prof, CTX, prev)
 
 
 def sizes(res):
@@ -162,3 +163,21 @@ def test_carnival_and_kant_are_not_split_by_size():
         c.article += "KANT"
     res = run(kant)
     assert len(res.groups) == 1 and res.groups[0].bid == "kant"
+
+
+def test_size_separates_only_above_threshold_otherwise_stays_in_parent():
+    cards = [card(1000 + i, "0-0-26") for i in range(10)] + [card(2000 + i, "0-0-20") for i in range(7)] +             [card(3000 + i, "0-0-22") for i in range(3)]
+    res = run(cards, tails=True, up=10, down=8)
+    sizes_ = sorted(len(g.cards) for g in res.groups)
+    assert sizes_ == [10, 10] and sum(g.mixed for g in res.groups) == 1       # размер 26 отдельно, 20+22 вместе как хвосты
+    assert res.separated == {"key:0-0-26|Наволочки|Сказка|0-0-26"}
+
+
+def test_size_hysteresis_keeps_yesterdays_separate_size_until_merge_down():
+    cards = [card(1000 + i, "0-0-26") for i in range(8)] + [card(2000 + i, "0-0-20") for i in range(7)]
+    fresh = run(cards, tails=True, up=10, down=8)                              # 8 < 10: вчерашнего решения нет, размеры сливаются
+    assert len(fresh.groups) == 1 and fresh.groups[0].mixed
+    held = run(cards, tails=True, up=10, down=8, prev={"key:0-0-26|Наволочки|Сказка|0-0-26"})   # вчера отделён, 8 >= 8: держим
+    assert sorted(len(g.cards) for g in held.groups) == [7, 8] or len(held.groups) == 2
+    dropped = run(cards[1:], tails=True, up=10, down=8, prev={"key:0-0-26|Наволочки|Сказка|0-0-26"})   # 7 < 8: сливаем
+    assert len(dropped.groups) == 1

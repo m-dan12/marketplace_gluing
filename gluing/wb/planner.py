@@ -40,6 +40,7 @@ class WbBuild:
     groups: list[WbSet]
     moved: Counter                        # «ветка → куда» для малых веток
     notes: list[str]
+    separated: set[str] | None = None     # размеры, отделённые в свою группу (состояние гистерезиса на завтра)
 
 
 def size_key(c: Card, profile: dict) -> str:
@@ -65,19 +66,33 @@ def _distance(a: tuple, b: tuple) -> int:
     return sum(abs(x - y) for x, y in zip(a, b))
 
 
-def merge_tails(sets: dict[tuple, list[Card]], profile: dict) -> None:
-    """Хвосты размеров (наборы меньше min_group, которые не удалось склеить в своём размере) объединяются с соседними размерами
-    той же ветки, категории и бренда; остаток присоединяется к ближайшему размеру, где есть место. Ромбы и т.п. (`no_mix_families`)
-    и ветки, не делящиеся по размеру, не затрагиваются. Меняет sets на месте."""
+def size_id(key_: tuple) -> str:
+    return "|".join((key_[0], *key_[2:]))
+
+
+def merge_tails(sets: dict[tuple, list[Card]], profile: dict, prev_sizes: frozenset[str] | set[str] = frozenset()) -> set[str]:
+    """Размер — такой же этап деления, как остальные: размер отделяется в свою группу при >= size_split_up карточек, а если вчера
+    был отделён, удерживается, пока карточек >= size_merge_down (гистерезис, как у Озона). Остальные размеры — хвосты: они объединяются
+    с соседними размерами той же ветки, категории и бренда; остаток меньше min_group присоединяется к ближайшему размеру, где есть
+    место. Ромбы и т.п. (`no_mix_families`) и ветки, не делящиеся по размеру, не затрагиваются. Меняет sets на месте;
+    возвращает идентификаторы отделённых размеров (состояние для завтрашнего запуска)."""
     lim, r = profile["limits"], profile["rules"]
     work, min_group = lim.get("work_group", lim["max_group"]), lim["min_group"]
+    up = r.get("size_split_up", min_group)
+    down = r.get("size_merge_down", up)
     skip = set(r.get("no_mix_families", ["rhomb"])) | {"carnival"}
     mix = set(r.get("mix_sizes_bids", []))
+    separated: set[str] = set()
     pools: dict[tuple, list[tuple]] = defaultdict(list)
     for key_, mem in sets.items():
         bid, rule, cat, br, key = key_
         fam = bid.split(":")[0]
-        if len(mem) < min_group and fam not in skip and fam not in mix:
+        if fam in skip or fam in mix:
+            continue
+        n = len(mem)
+        if n >= up or (size_id(key_) in prev_sizes and n >= down):
+            separated.add(size_id(key_))
+        else:
             pools[(fam, cat, br)].append(key_)
     for (fam, cat, br), keys in pools.items():
         keys.sort(key=lambda k: _key_nums(sets[k]))
@@ -107,9 +122,11 @@ def merge_tails(sets: dict[tuple, list[Card]], profile: dict) -> None:
             host = min(hosts, key=lambda k: (_distance(_key_nums(sets[k]), _key_nums(mem)), k))
             merged = sets.pop(host) + sets.pop(key_)
             sets[(host[0], host[1], cat, br, host[4] + "+" + key)] = merged
+    return separated
 
 
-def build_wb(cards: list[Card], live: dict[int, int], imt_members: dict[int, set[int]], profile: dict, ctx: Context) -> WbBuild:
+def build_wb(cards: list[Card], live: dict[int, int], imt_members: dict[int, set[int]], profile: dict, ctx: Context,
+             prev_sizes: frozenset[str] | set[str] = frozenset()) -> WbBuild:
     """cards — активные карточки с остатком (бренд по префиксу, ключ не пустой); live — {nm_id: текущий imtID};
     imt_members — {imtID: все nm_id в склейке на WB, в том числе неактивные и вне плана}."""
     lim = profile["limits"]
@@ -140,8 +157,7 @@ def build_wb(cards: list[Card], live: dict[int, int], imt_members: dict[int, set
                 changed = True
                 break
 
-    if profile["rules"].get("merge_tails", False):
-        merge_tails(sets, profile)
+    separated = merge_tails(sets, profile, prev_sizes) if profile["rules"].get("merge_tails", False) else None
 
     planned = {k.nm_id for k in cards}
     members = {i: set(v) for i, v in imt_members.items()}
@@ -197,4 +213,4 @@ def build_wb(cards: list[Card], live: dict[int, int], imt_members: dict[int, set
                 kind = "glue" if len(part) >= min_group else ("small_glue" if len(part) > 1 else "single_design")
                 mixed = len({size_key(c, profile) for c in part}) > 1
                 out.append(WbSet(imt, bid, rule, cat, br, key, i + 1, part, grown=grown, kind=kind, mixed=mixed))
-    return WbBuild(out, moved, notes)
+    return WbBuild(out, moved, notes, separated)
