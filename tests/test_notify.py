@@ -82,3 +82,46 @@ def test_wb_texts_name_the_platform():
     s = render("gluing.wb.apply_started", {"run_id": "r", "ops": 5, "summary": {}, "warns": []})
     assert "Склейки WB" in s and "()" not in s
     assert "Склейки Озона" in render("gluing.ozon.applied", {"run_id": "r", "ops": 1, "result": {"done": 1}})
+
+
+def test_classify_levels_and_titles():
+    from ops.notify import classify
+    assert classify("gluing.ozon.apply_started", {}) == ("info", "Склейки Озона: запущено применение")
+    assert classify("gluing.ozon.applied", {"ops": 0})[0] == "ok"
+    assert classify("gluing.ozon.applied", {"ops": 5, "result": {"done": 5}}) == ("ok", "Склейки Озона: применено полностью")
+    assert classify("gluing.ozon.applied", {"ops": 5, "result": {"done": 4, "failed": 1}})[0] == "warn"
+    assert classify("gluing.ozon.applied", {"ops": 5, "result": {"done": 5}, "stopped": "лимит"})[0] == "warn"
+    assert classify("gluing.wb.apply_blocked", {"reasons": ["x"]}) == ("error", "Склейки WB: автоприменение остановлено")
+    lvl, title = classify("ops.alert", {"text": "воркер wb молчит 356 с"})
+    assert lvl == "warn" and title.startswith("Склейки:")
+
+
+def test_ops_monitor_sink_posts_with_agent_token_and_key_and_skips_the_log_file(tmp_path):
+    from ops.notify import OpsMonitor
+    http = FakeHttp()
+    log = tmp_path / "n.log"
+    h = make_handler(None, log, OpsMonitor("http://mon:8750/", "agent-tok", "proftex-server", client=http))
+    h(ev("gluing.ozon.apply_blocked", {"run_id": "r", "reasons": ["стоп-файл"]}, i=42))
+    url, body, headers = http.sent[0]
+    assert url == "http://mon:8750/api/agent/notice?host_id=proftex-server" and headers["Authorization"] == "Bearer agent-tok"
+    assert body["key"] == "bus-42" and body["level"] == "error" and body["source"] == "склейки" and "стоп-файл" in body["text"] and body["ts"]
+    assert not log.exists()                                  # канал подключён: отдельный файл не нужен
+
+
+def test_ops_monitor_error_is_raised_for_retry_and_log_fallback_without_channels(tmp_path):
+    from ops.notify import OpsMonitor
+    http = FakeHttp(status=502)
+    http.sent = []
+    bad = OpsMonitor("http://mon", "t", client=http)
+    http_bad = type("H", (), {"post": lambda self, *a, **k: type("R", (), {"status_code": 502, "text": "bad gateway"})()})()
+    bad._client = http_bad
+    with pytest.raises(RuntimeError, match="HTTP 502"):
+        make_handler(None, tmp_path / "n.log", bad)(ev("ops.alert", {"text": "x"}))
+    make_handler(None, tmp_path / "n2.log")(ev("ops.alert", {"text": "тест"}))                  # ни одного канала: лог-файл, как раньше
+    assert "тест" in (tmp_path / "n2.log").read_text(encoding="utf-8")
+
+
+def test_ops_from_conf_needs_url_and_token():
+    from ops.notify import ops_from_conf
+    assert ops_from_conf(lambda k: {"OPSMON_URL": "http://m", "OPSMON_TOKEN": "t"}.get(k, "")).host_id == "proftex-server"
+    assert ops_from_conf(lambda k: {"OPSMON_URL": "http://m"}.get(k, "")) is None

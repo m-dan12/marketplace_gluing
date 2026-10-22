@@ -1,11 +1,17 @@
-"""Уведомления из шины в Яндекс Мессенджер (бот организации Яндекс 360).
+"""Уведомления из шины: в дашборд Ops Monitor и (когда появится бот) в Яндекс Мессенджер.
 
-Подписчик notify читает события gluing.ozon.apply_started / applied / apply_blocked и ops.alert, переводит их в короткий текст и
-отправляет ботом. Настройки в .env проекта (значения в чат и в логи не попадают):
+Подписчик notify читает события gluing.<ozon|wb>.apply_started / applied / apply_blocked и ops.alert, переводит их в короткий текст и
+отправляет в подключённые каналы. Настройки в .env проекта (значения в чат и в логи не попадают).
+
+Дашборд Ops Monitor (основной канал, пока нет бота):
+    OPSMON_URL         адрес сервера монитора, например http://100.74.113.18:8750
+    OPSMON_TOKEN       токен агента этого хоста (тот же, что у агента Ops Monitor на proftex-server)
+    OPSMON_HOST_ID     имя хоста в мониторе (по умолчанию proftex-server)
+Яндекс Мессенджер (бот организации Яндекс 360):
     YANDEX_BOT_TOKEN   токен бота (админка Яндекс 360, раздел «Боты»)
     YANDEX_CHAT_ID     идентификатор группового чата (бот должен быть его участником), либо
     YANDEX_LOGIN       логин сотрудника для личных сообщений
-Пока токен не задан, тексты пишутся в logs/notify.log, а события считаются обработанными."""
+Пока не подключён ни один канал, тексты пишутся в logs/notify.log, а события считаются обработанными."""
 from __future__ import annotations
 
 import logging
@@ -51,6 +57,43 @@ def render(topic: str, p: dict) -> str | None:
     return None
 
 
+def classify(topic: str, p: dict) -> tuple[str, str]:
+    """(уровень, заголовок) для дашборда: info / ok / warn / error. Текст сообщения даёт render()."""
+    plat = "WB" if ".wb." in topic else "Озона"
+    topic = topic.replace(".wb.", ".ozon.")
+    if topic == "gluing.ozon.apply_started":
+        return "info", f"Склейки {plat}: запущено применение"
+    if topic == "gluing.ozon.applied":
+        if not p.get("ops"):
+            return "ok", f"Склейки {plat}: изменений не нужно"
+        r = p.get("result") or {}
+        if r.get("failed", 0) + r.get("skipped", 0) or p.get("stopped"):
+            return "warn", f"Склейки {plat}: применено с замечаниями"
+        return "ok", f"Склейки {plat}: применено полностью"
+    if topic == "gluing.ozon.apply_blocked":
+        return "error", f"Склейки {plat}: автоприменение остановлено"
+    return "warn", ("Склейки: " + str(p.get("text", "проблема цепочки")).split(":")[0])[:120]
+
+
+class OpsMonitor:
+    """Канал в дашборд Ops Monitor: POST /api/agent/notice с токеном агента хоста. key делает отправку идемпотентной."""
+
+    def __init__(self, url: str, token: str, host_id: str = "proftex-server", source: str = "склейки", client=None):
+        if not url or not token:
+            raise ValueError("нужен OPSMON_URL и OPSMON_TOKEN")
+        self.url, self.token, self.host_id, self.source, self._client = url.rstrip("/"), token, host_id, source, client
+
+    def send(self, level: str, title: str, text: str, key: str, ts: int | None = None) -> None:
+        import httpx
+        body = {"host_id": self.host_id, "source": self.source, "key": key, "level": level, "title": title[:200], "text": text[:4000]}
+        if ts:
+            body["ts"] = ts
+        r = (self._client or httpx).post(f"{self.url}/api/agent/notice?host_id={self.host_id}", json=body,
+                                         headers={"Authorization": f"Bearer {self.token}"}, timeout=15)
+        if r.status_code >= 400:
+            raise RuntimeError(f"Ops Monitor: HTTP {r.status_code} {str(r.text)[:200]}")
+
+
 class Yandex:
     def __init__(self, token: str, chat_id: str = "", login: str = "", client=None):
         if not token or not (chat_id or login):
@@ -75,12 +118,23 @@ def from_conf(conf) -> Yandex | None:
     return Yandex(token, chat, login) if token and (chat or login) else None
 
 
-def make_handler(client: Yandex | None, log_file: Path | None = None):
-    """Обработчик событий для Router. Ошибка отправки поднимается наверх: шина повторит с паузой."""
+def ops_from_conf(conf) -> OpsMonitor | None:
+    url, token = conf("OPSMON_URL"), conf("OPSMON_TOKEN")
+    return OpsMonitor(url, token, conf("OPSMON_HOST_ID") or "proftex-server") if url and token else None
+
+
+def make_handler(client: Yandex | None, log_file: Path | None = None, ops: OpsMonitor | None = None):
+    """Обработчик событий для Router. Ошибка отправки поднимается наверх: шина повторит с паузой (в мониторе дубль исключён ключом
+    события, в мессенджере — payload_id)."""
     def h(ev):
         text = render(ev.topic, ev.payload)
         if not text:
             return
+        if ops is not None:
+            level, title = classify(ev.topic, ev.payload)
+            ops.send(level, title, text, key=f"bus-{ev.id}", ts=int(ev.created_at.timestamp()) if getattr(ev, "created_at", None) else None)
+        if client is None and ops is not None:
+            return                                                   # дашборд подключён: лог-файл нужен только как запасной канал
         if client is None:
             line = f"{datetime.now().isoformat(timespec='seconds')} [{ev.topic}] {text}\n"
             if log_file:

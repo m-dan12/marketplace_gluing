@@ -170,10 +170,12 @@ def env_path_of():
 
 def handler_notify(bus):
     from ops import notify
-    client = notify.from_conf(conf)
-    if client is None:
-        log.warning("YANDEX_BOT_TOKEN / YANDEX_CHAT_ID не заданы: уведомления пишутся в logs/notify.log")
-    return notify.make_handler(client, ROOT / "logs" / "notify.log")
+    client, ops = notify.from_conf(conf), notify.ops_from_conf(conf)
+    if client is None and ops is None:
+        log.warning("ни OPSMON_URL/OPSMON_TOKEN, ни YANDEX_BOT_TOKEN не заданы: уведомления пишутся в logs/notify.log")
+    elif client is None:
+        log.info("уведомления идут в дашборд Ops Monitor (%s)", ops.url)
+    return notify.make_handler(client, ROOT / "logs" / "notify.log", ops)
 
 
 def _notify_topics() -> list[str]:
