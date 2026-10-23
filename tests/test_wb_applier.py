@@ -167,3 +167,25 @@ def test_rollback_restores_old_groups():
     r = rollback_wb("r", {"skazka": w}, j, nm, ST)
     assert r["result"] == {"reverted": 2}
     assert w.state[3] == 20 and w.state[4] == 20
+
+
+class LaggingWb(FakeWb):
+    """WB применяет moveNm с задержкой: первые lag перечитываний видят старую склейку."""
+
+    def __init__(self, state, lag):
+        super().__init__(state)
+        self.lag, self.reads, self.old = lag, 0, dict(state)
+
+    def imts(self, account, cards):
+        self.reads += 1
+        out = super().imts(account, cards)
+        if self.moves and self.reads <= self.lag:
+            return {n: self.old[n] for n in out}
+        return out
+
+
+def test_verification_waits_for_lagging_wb():
+    w = LaggingWb({1: 10, 2: 20}, lag=3)
+    res = dry_run_wb(plan(group("g", [1, 2], 10)), live_of(w))
+    out = execute_wb("r", res.ops, {"skazka": w}, MemoryJournal(), WbSettings(sleep=lambda s: None, probe=False), res.sizes)
+    assert out["result"] == {"done": 1} and w.state[2] == 10                   # перенос дошёл до цели при повторном чтении

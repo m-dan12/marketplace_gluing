@@ -119,7 +119,9 @@ class WbPort:
         body: dict = {"nmIDs": nm_ids}
         if target is not None:
             body["targetIMT"] = target
-        self.apis[account].post("/content/v2/cards/moveNm", body, write=True)
+        resp = self.apis[account].post("/content/v2/cards/moveNm", body, write=True)
+        if isinstance(resp, dict) and resp.get("error"):                 # WB отвечает 200 и причину кладёт в тело
+            raise RuntimeError(f"moveNm: {str(resp.get('errorText') or resp.get('additionalErrors') or resp)[:250]}")
 
 
 def read_env_files(env: str, merge: str = "") -> tuple[dict[str, str], dict[str, str]]:

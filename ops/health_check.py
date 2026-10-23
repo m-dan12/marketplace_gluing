@@ -61,9 +61,10 @@ def collect(bus_conn, data_conn, now: datetime) -> dict:
     s["expired"] = dict(rows(bus_conn, "select consumer, count(*) from bus.delivery where status='running' and locked_until < now() group by 1"))
     s["sync_today"] = bool(rows(bus_conn, "select 1 from bus.event where topic='sync.ozon.done' and created_at::date = current_date limit 1"))
     s["sync_wb_today"] = bool(rows(bus_conn, "select 1 from bus.event where topic='sync.wb.done' and created_at::date = current_date limit 1"))
-    s["apply_stuck"] = [r[0] for r in rows(bus_conn, "select e.key from bus.event e where e.topic in ('gluing.ozon.apply_started', 'gluing.wb.apply_started') "
+    s["apply_stuck"] = [r[0] for r in rows(bus_conn, "select e.payload->>'run_id' from bus.event e where e.topic in ('gluing.ozon.apply_started', 'gluing.wb.apply_started') "
                                                     "and e.created_at < now() - interval '3 hours' and e.created_at > now() - interval '2 days' "
-                                                    "and not exists (select 1 from bus.event a where a.topic in ('gluing.ozon.applied', 'gluing.wb.applied') and a.key = e.key)")]
+                                                    "and not exists (select 1 from bus.event a where a.topic in ('gluing.ozon.applied', 'gluing.wb.applied') "
+                                                    "and a.payload->>'run_id' = e.payload->>'run_id')")]     # ключ у started — дата, у applied — run_id: сверяем по run_id
     s["plan_today"] = bool(rows(data_conn, "select 1 from gluing.run where platform='ozon' and created_at::date = current_date limit 1"))
     s["plan_wb_today"] = bool(rows(data_conn, "select 1 from gluing.run where platform='wb' and created_at::date = current_date limit 1"))
     beats = {}
@@ -86,9 +87,10 @@ def orphan_runs(bus_conn, task_running: bool) -> list[tuple[str, int]]:
     if task_running:
         return []
     with bus_conn.cursor() as cur:
-        cur.execute("select e.key from bus.event e where e.topic='gluing.wb.apply_started' "
+        cur.execute("select e.payload->>'run_id' from bus.event e where e.topic='gluing.wb.apply_started' "
                     "and e.created_at < now() - make_interval(mins => %s) and e.created_at > now() - interval '2 days' "
-                    "and not exists (select 1 from bus.event a where a.topic in ('gluing.wb.applied') and a.key = e.key)", (RESUME_AFTER_MIN,))
+                    "and not exists (select 1 from bus.event a where a.topic in ('gluing.wb.applied') "
+                    "and a.payload->>'run_id' = e.payload->>'run_id')", (RESUME_AFTER_MIN,))
         keys = [r[0] for r in cur.fetchall()]
         out = []
         for k in keys:
@@ -148,7 +150,7 @@ def main() -> int:
                 bus.publish("ops.alert", key=f"{kind}:{now:%Y%m%d%H}", payload={"kind": kind, "text": text}, producer="health")
         finally:
             bus.close()
-    return 1 if found else 0
+    return 1 if found and a.only_print else 0         # по расписанию проблемы уходят в ops.alert; код 1 сделал бы сам запуск «мёртвым» сообщением
 
 
 if __name__ == "__main__":

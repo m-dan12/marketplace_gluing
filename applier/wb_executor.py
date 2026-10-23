@@ -32,6 +32,7 @@ class WbSettings:
     probe: bool = True
     max_ops: int = 1500
     verify_pause: int = 7
+    verify_retries: int = 5                      # перечитываний, если сразу после переноса карточка ещё видна в старой склейке (WB применяет не мгновенно)
     split_polls: int = 12
     split_delay: int = 15
     hard_max: int = HARD_MAX
@@ -136,6 +137,11 @@ class _Account:
                 self.port.move(self.acc, ids, t)
                 self.st.sleep(self.st.verify_pause)
                 after = self.port.imts(self.acc, [(r["offer_id"], self.n(r)) for r in take])
+                for k in range(self.st.verify_retries):                # WB применяет moveNm с задержкой: ждём, пока карточки дойдут до цели
+                    if all(after.get(self.n(r)) == t for r in take):
+                        break
+                    self.st.sleep(self.st.verify_pause * (k + 2))
+                    after = self.port.imts(self.acc, [(r["offer_id"], self.n(r)) for r in take])
             except Exception as e:
                 for r in take:
                     self.finish(r, "failed", _err(e))
