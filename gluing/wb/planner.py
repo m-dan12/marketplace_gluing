@@ -67,6 +67,10 @@ def _distance(a: tuple, b: tuple) -> int:
     return sum(abs(x - y) for x, y in zip(a, b))
 
 
+def branch_id(bid: str, cat: str, br: str) -> str:
+    return "ветка|" + "|".join((bid, cat, br))
+
+
 def size_id(key_: tuple) -> str:
     return "|".join((key_[0], *key_[2:]))
 
@@ -155,21 +159,37 @@ def build_wb(cards: list[Card], live: dict[int, int], imt_members: dict[int, set
         sets[(b.bid, b.rule, k.category, k.brand, "" if b.bid.split(":")[0] in mix_bids else size_key(k, profile))].append(k)
 
     moved: Counter = Counter()
+    rl = profile["rules"]
+    up_b, down_b, feat_min = rl.get("branch_split_up", 10), rl.get("branch_merge_down", 8), rl.get("feature_min_designs", 2)
+    prev = set(prev_sizes)
+    kept: set[str] = set()                                             # детские и эко, отделённые в свою ветку (гистерезис на завтра)
     changed = True
-    while changed:                                                     # малая ветка уходит в запасную, пока есть что переносить
+    while changed:                                                     # ветка решается целиком, как на Озоне; ушедшая уходит в запасную
         changed = False
-        for key_, mem in list(sets.items()):
-            bid, rule, cat, br, key = key_
-            if bid in FALL and key and 0 < len(mem) < min_group:         # key пуст у веток без деления по размеру: запасной ключ не из чего строить
-                nb = FALL[bid]
+        branches: dict[tuple, list[Card]] = defaultdict(list)
+        for (bid, rule, cat, br, key), mem in sets.items():
+            if bid in FALL and key:                                    # key пуст у веток без деления по размеру: запасной ключ не из чего строить
+                branches[(bid, rule, cat, br)] += mem
+        for (bid, rule, cat, br), mem in sorted(branches.items()):
+            n = len({k.design for k in mem})
+            bkey = branch_id(bid, cat, br)
+            if bid in ("eco", "child"):                                # детские и эко: отделяются при >= branch_split_up дизайнов, удерживаются >= branch_merge_down
+                if n >= (down_b if bkey in prev else up_b):
+                    kept.add(bkey)
+                    continue
+            elif n >= feat_min:                                        # признак: определяет ветку, порог лишь отсекает ветку из одного дизайна
+                continue
+            nb = FALL[bid]
+            for key_ in [k for k in sets if k[:4] == (bid, rule, cat, br) and k[4]]:
+                key = key_[4]
                 nbid, nrule = _fallback_rule(nb, cat, key) if nb else (f"key:{key}", f"Ключ {key}")
                 tgt = next((kk for kk in sets if kk[0] == nbid and kk[2:] == (cat, br, key)), (nbid, nrule, cat, br, key))
                 sets.setdefault(tgt, [])
-                sets[tgt] = sets[tgt] + mem
-                del sets[key_]
-                moved[f"{rule}->{tgt[1]}"] += len(mem)
-                changed = True
-                break
+                part = sets.pop(key_)
+                sets[tgt] = sets[tgt] + part
+                moved[f"{rule}->{tgt[1]}"] += len(part)
+            changed = True
+            break
 
     sv = profile.get("solver", {})
     mode = solver or sv.get("mode", "greedy")                           # "cpsat" | "greedy"; нет ortools или он не работает: жадный
@@ -239,4 +259,4 @@ def build_wb(cards: list[Card], live: dict[int, int], imt_members: dict[int, set
                 kind = "glue" if len(part) >= min_group else ("small_glue" if len(part) > 1 else "single_design")
                 mixed = len({size_key(c, profile) for c in part}) > 1
                 out.append(WbSet(imt, bid, rule, cat, br, key, i + 1, part, grown=grown, kind=kind, mixed=mixed))
-    return WbBuild(out, moved, notes, separated)
+    return WbBuild(out, moved, notes, (separated or set()) | kept if separated is not None or kept else None)

@@ -92,10 +92,31 @@ def test_sticky_imt_inherited_by_majority_and_not_shared():
 
 def test_small_ruffle_branch_falls_back_to_generic_key():
     # рюши: последнее число ключа 13; менее min_group карточек -> уходят в обычный ключ
-    ruffle = [card(i, "0-0-13") for i in range(1000, 1003)]
+    ruffle = [card(1000, "0-0-13", nm=n) for n in range(1, 4)]            # ветка из одного дизайна (feature_min_designs = 2)
     res = run(ruffle)
     assert len(res.groups) == 1 and res.groups[0].bid == "key:0-0-13"
     assert any("Рюши" in k for k in res.moved)
+    assert run([card(i, "0-0-13") for i in range(1000, 1003)]).groups[0].bid == "ruffle"       # дизайнов хватает: ветка остаётся
+
+
+def test_child_branch_stays_when_enough_designs_and_falls_back_when_few():
+    ctx = Context(PROFILE, frozenset(), frozenset(str(i) for i in range(900, 930)))
+    many = [card(i, "0-0-1", cat="Пододеяльники") for i in range(900, 912)]
+    few = [card(i, "0-0-1", cat="Пододеяльники") for i in range(900, 905)]
+    prof = {**PROFILE, "rules": {**PROFILE["rules"], "merge_tails": False, "size_split_up": 6, "size_merge_down": 6}}
+    res = build_wb(many, {}, {}, prof, ctx, frozenset(), solver="greedy")
+    assert {g.bid for g in res.groups} == {"child"} and any(x.startswith("ветка|child") for x in res.separated)
+    res = build_wb(few, {}, {}, prof, ctx, frozenset(), solver="greedy")
+    assert {g.bid for g in res.groups} == {"key:0-0-1"} and not res.separated    # мало дизайнов: остаются в обычной ветке, как на Озоне
+
+
+def test_child_branch_hysteresis_keeps_yesterdays_branch():
+    ctx = Context(PROFILE, frozenset(), frozenset(str(i) for i in range(900, 930)))
+    nine = [card(i, "0-0-1", cat="Пододеяльники") for i in range(900, 909)]      # 9: между merge_down (8) и split_up (10)
+    prof = {**PROFILE, "rules": {**PROFILE["rules"], "merge_tails": False, "size_split_up": 6, "size_merge_down": 6}}
+    assert {g.bid for g in build_wb(nine, {}, {}, prof, ctx, frozenset(), solver="greedy").groups} == {"key:0-0-1"}
+    yesterday = frozenset({"ветка|child|Пододеяльники|Сказка"})
+    assert {g.bid for g in build_wb(nine, {}, {}, prof, ctx, yesterday, solver="greedy").groups} == {"child"}
 
 
 def test_hotel_pillowcase_key_merges_into_regular_size():
