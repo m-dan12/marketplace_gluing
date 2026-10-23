@@ -27,7 +27,7 @@ def dump(path: str) -> None:
         out["rolls"] = read_rolls(conn)
         for acc, prof in CABINETS.items():
             p = load_profile(prof)
-            rows = read_wb_rows(conn, acc, out["as_of"], p["stock"]["wb_mode"])
+            rows = read_wb_rows(conn, acc, out["as_of"], p["stock"]["wb_mode"], grace_days=p["stock"].get("grace_days", 0))
             out["accounts"][acc] = {"rows": rows, "imt": {str(k): sorted(v) for k, v in read_imt_members(conn, acc).items()}}
         conn.rollback()
     with open(path, "w", encoding="utf-8") as f:

@@ -30,6 +30,7 @@ def context_for(profile: dict) -> Context:
 
 def load_cards(rows: list[dict], rolls: dict[str, int], profile: dict) -> Loaded:
     alias = profile.get("brands", {}).get("wb_alias", {})
+    grace = profile.get("stock", {}).get("grace_days", 0)
     fabric = profile["rules"]["fabric_category"]
     cards: list[Card] = []
     live: dict[int, int] = {}
@@ -53,8 +54,9 @@ def load_cards(rows: list[dict], rolls: dict[str, int], profile: dict) -> Loaded
             if m and code in rolls:
                 c.roll_code, c.roll_len_m = code, int(m.group(1))
                 c.stock_roll = rolls[code] // c.roll_len_m
-        if c.stock_total <= 0:
-            skip("нет остатка")
+        out_days = r.get("out_days")
+        if c.stock_total <= 0 and not (out_days is not None and out_days <= grace):
+            skip("нет остатка")                             # остатка нет, и льготный период (grace_days) после обнуления не действует
             continue
         if brand is None:                                   # неактивные карточки в счёт не идут: склеивать нечего
             skip("неизвестный префикс")

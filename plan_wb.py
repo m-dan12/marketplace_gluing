@@ -36,7 +36,8 @@ def run_plan(as_of: str, dry: bool = False, accounts: list[str] | None = None, j
         groups, loaded, inputs, sizes_state = [], {}, {"as_of": as_of}, {}
         for acc in accounts:
             prof = profiles[acc]
-            rows = read_wb_rows(conn, acc, as_of, prof.get("stock", {}).get("wb_mode", "all_physical"))
+            rows = read_wb_rows(conn, acc, as_of, prof.get("stock", {}).get("wb_mode", "all_physical"),
+                               grace_days=prof.get("stock", {}).get("grace_days", 0))
             ld = load_cards(rows, rolls, prof)
             res = build_wb(ld.cards, ld.live, read_imt_members(conn, acc), prof, context_for(prof), set(prev_sizes.get(acc, [])))
             sizes_state[acc] = sorted(res.separated or [])

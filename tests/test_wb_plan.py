@@ -89,3 +89,12 @@ def test_carnival_without_key_is_glued_by_garment_type():
     groups = build_wb_groups("skazka", res, ld.live)
     plan = assemble_plan(groups, {"skazka": prof}, {"skazka": ld}, run_id="r", engine_version="t", inputs={}, profile_name="p")
     assert not plan.checks.hard_violations
+
+
+def test_loader_grace_period_after_stock_out():
+    prof = load_profile("wb_proftex")
+    assert prof["stock"]["grace_days"] == 3
+    rows = [{**row(f"PT{i}/0-0-26/1", i, stock=0), "out_days": d} for i, d in ((1, 2), (2, 3), (3, 4), (4, None))]
+    ld = load_cards(rows, ROLLS, prof)
+    assert [c.nm_id for c in ld.cards] == [1, 2]            # обнулились 2 и 3 дня назад: ещё в плане; 4 дня и «не было остатка» — нет
+    assert ld.skipped == {"нет остатка": 2}
