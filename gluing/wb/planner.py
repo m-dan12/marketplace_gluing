@@ -14,6 +14,7 @@ from collections import Counter, defaultdict
 from dataclasses import dataclass
 
 from gluing.model import Card
+from gluing.ozon.sizes import lead_of
 from gluing.rules import Context, assign
 from gluing.wb import cpsat
 
@@ -75,6 +76,13 @@ def size_id(key_: tuple) -> str:
     return "|".join((key_[0], *key_[2:]))
 
 
+def _lead(cat: str, br: str, key: str, r: dict) -> str:
+    """Размерность КПБ для разделения пулов хвостов; у остальных категорий и у брендов lead_mix_brands пусто (размеры можно смешивать)."""
+    if cat not in r.get("lead_types", []) or br in r.get("lead_mix_brands", []):
+        return ""
+    return lead_of(key.split("+")[0])
+
+
 def merge_tails(sets: dict[tuple, list[Card]], profile: dict, prev_sizes: frozenset[str] | set[str] = frozenset(),
                 use_solver: bool = False) -> set[str]:
     """Размер — такой же этап деления, как остальные: размер отделяется в свою группу при >= size_split_up карточек, а если вчера
@@ -100,8 +108,8 @@ def merge_tails(sets: dict[tuple, list[Card]], profile: dict, prev_sizes: frozen
         if n >= up or (size_id(key_) in prev_sizes and n >= down):
             separated.add(size_id(key_))
         else:
-            pools[(fam, cat, br)].append(key_)
-    for (fam, cat, br), keys in pools.items():
+            pools[(fam, cat, br, _lead(cat, br, key, r))].append(key_)
+    for (fam, cat, br, _), keys in pools.items():
         keys.sort(key=lambda k: _key_nums(sets[k]))
         bins: list[list[tuple]] = [[]]
         size = 0
@@ -134,7 +142,9 @@ def merge_tails(sets: dict[tuple, list[Card]], profile: dict, prev_sizes: frozen
         fam = bid.split(":")[0]
         if not (len(mem) < min_group and fam not in skip and fam not in mix):
             continue
+        lead = _lead(cat, br, key, r)
         hosts = [k for k, m in sets.items() if k != key_ and k[2:4] == (cat, br) and k[0].split(":")[0] == fam.split(":")[0]
+                 and _lead(cat, br, k[4], r) == lead
                  and k[0].split(":")[0] not in mix and len(m) >= min_group and len(m) + len(mem) <= work]
         if hosts:
             host = min(hosts, key=lambda k: (_distance(_key_nums(sets[k]), _key_nums(mem)), k))

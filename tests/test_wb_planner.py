@@ -238,3 +238,43 @@ def test_cpsat_tails_not_worse_than_greedy_on_group_count():
     g = run(cards, tails=True, solver="greedy", up=10)
     s = run(cards, tails=True, solver="cpsat", up=10)
     assert len(s.groups) <= len(g.groups)
+
+
+KPB = "Постельное белье"
+
+
+def test_kpb_tails_do_not_mix_sizes():
+    cards = [card(i, "4-13-26", cat=KPB, prefix="MY") for i in range(1000, 1003)] + [card(i, "8-61-28", cat=KPB, prefix="MY") for i in range(2000, 2003)]
+    res = run(cards, tails=True)
+    assert sorted(len(g.cards) for g in res.groups) == [3, 3]            # 1,5-сп и семейный остаются отдельно, хоть и малы
+    assert all(len({c.key.split("-")[0] for c in g.cards}) == 1 for g in res.groups)
+
+
+def test_kpb_leftover_goes_to_group_of_own_size():
+    cards = ([card(i, "8-61-28", cat=KPB, prefix="MY") for i in range(1000, 1010)] + [card(i, "8-16-17", cat=KPB, prefix="MY") for i in range(2000, 2003)]
+             + [card(i, "4-13-26", cat=KPB, prefix="MY") for i in range(3000, 3002)])
+    res = run(cards, tails=True, up=8, down=8)
+    by_lead = {}
+    for g in res.groups:
+        by_lead.setdefault(g.cards[0].key.split("-")[0], []).append(len(g.cards))
+    assert by_lead == {"8": [13], "4": [2]}                               # остаток семейного прилип к семейному, 1,5-сп отдельно
+
+
+def test_other_categories_still_mix_tails():
+    cards = [card(i, "4-13-26", cat="Простыни", prefix="MY") for i in range(1000, 1003)] + [card(i, "8-61-28", cat="Простыни", prefix="MY") for i in range(2000, 2003)]
+    assert sizes(run(cards, tails=True)) == [6]
+
+
+def test_kpb_rhomb_is_separate_by_key():
+    cards = [card(i, "54-16-26", cat=KPB, prefix="MY") for i in range(1000, 1007)] + [card(i, "5-16-26", cat=KPB, prefix="MY") for i in range(2000, 2010)]
+    res = run(cards)
+    assert sorted((g.bid, len(g.cards)) for g in res.groups) == [("key:5-16-26", 10), ("rhomb:54-16-26", 7)]
+
+
+def test_child_outranks_eco():
+    names = frozenset(str(7000 + i) for i in range(10))
+    ctx = Context(PROFILE, names, names)
+    prof = {**PROFILE, "rules": {**PROFILE["rules"], "merge_tails": False}}
+    kids = [card(7000 + i, "4-13-26", cat=KPB, prefix="PT") for i in range(10)]
+    res = build_wb(kids, {}, {}, prof, ctx, solver="greedy")
+    assert [g.bid for g in res.groups] == ["child"]                       # детский дизайн из списка эко остаётся в детских

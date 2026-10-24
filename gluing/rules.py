@@ -101,9 +101,10 @@ def ruffle(c: Card, x: Context):
 
 
 def rhomb(c: Card, x: Context):
-    if c.category == "Пододеяльники" and c.key_nums and c.key_nums[0] in x.p["rhomb_first"]:
-        return Bucket(c.brand, c.category, f"rhomb:{c.key}", f"РОМБЫ Пододеяльники — только {c.key}",
-                      "ромбы: только свой ключ")
+    if c.category in x.p.get("rhomb_categories", ["Пододеяльники"]) and c.key_nums and c.key_nums[0] in x.p["rhomb_first"]:
+        name = "комплекты" if c.category == "Постельное белье" else c.category
+        return Bucket(c.brand, c.category, f"rhomb:{c.key}", f"РОМБЫ {name} — только {c.key}",
+                      "ромбы: только свой ключ, выше правил эко и детских")
 
 
 def generic(c: Card, x: Context):

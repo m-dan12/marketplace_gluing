@@ -148,6 +148,7 @@ def build(designs: list[Design], profile: dict, prev: dict | None = None):
     assign: dict[str, str] = {}
 
     fh = profile.get("features", {})
+    whole_branches = set(fh.get("whole_branches", []))
     feat_up, feat_down = fh.get("split_up", hy["split_up"]), fh.get("merge_down", hy["merge_down"])
     feat_free = "split_up" in fh                          # признаки не требуют жизнеспособного остатка обычной ветки
 
@@ -237,7 +238,7 @@ def build(designs: list[Design], profile: dict, prev: dict | None = None):
             branches = ({default: rest} if rest else {}) | sep
 
         for bname, bds in branches.items():
-            if typ not in BED:
+            if typ not in BED or bname in whole_branches:          # ромбы: правило выше эко, детских и размерности, пододеяльники и КПБ каждый целиком
                 finalize(acc, brand, typ, bname, bds)
                 continue
             leaves = []

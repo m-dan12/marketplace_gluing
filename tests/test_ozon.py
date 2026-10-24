@@ -509,3 +509,13 @@ def test_small_brands_of_a_family_share_a_glue_and_big_ones_do_not():
 def test_pa_keeps_all_sizes_in_one_group():
     groups, _, _ = run_sized(_plain(3, 70000, "4-13-26", "PA") + _plain(3, 70000, "5-13-26", "PA") + _plain(2, 70100, "6-13-26", "PA"))
     assert len(groups) == 1 and groups[0].leaf == "Обычные" and len(groups[0].designs) == 5
+
+
+def test_rhomb_kpb_stay_together_regardless_of_size_and_eco():
+    from gluing.lists import eco_designs
+    eco = sorted(eco_designs())[:3]
+    sk = ([sku(f"PT{80000 + i}/44-13-26/1") for i in range(5)] + [sku(f"PT{80100 + i}/54-13-26/1") for i in range(5)]
+          + [sku(f"PT{e}/44-13-26/1") for e in eco])
+    groups, _, _ = run_sized(sk + _plain(12, 70000, "4-13-26"))
+    rh = [g for g in groups if g.leaf.startswith("Ромбы")]
+    assert len(rh) == 1 and len(rh[0].designs) == 13                       # ромбы с разной размерностью и эко-дизайны: одна склейка, без деления
