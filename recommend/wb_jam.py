@@ -134,10 +134,10 @@ class Chrome:
 def upload(port: int, files: list[Path], action: str = "replace", hint: str = "", log=print) -> dict:
     """Загружает файлы в Джем (режим action: replace | add | delete). Возвращает {"auth": вариант заголовков, "results": [...]}; ошибки по файлам — в results[].error."""
     chrome = Chrome(port)
-    chrome.attach()
     results: list[dict] = []
     auth = ""
     try:
+        chrome.attach()
         for i in range(0, len(files), BATCH):
             part = [{"name": f.name, "b64": base64.b64encode(f.read_bytes()).decode()} for f in files[i:i + BATCH]]
             out = chrome.evaluate(f"({PAGE_JS})({json.dumps(part)}, {json.dumps(action)}, {json.dumps(hint)})")
