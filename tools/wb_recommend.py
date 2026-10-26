@@ -2,8 +2,8 @@
 
     python -m tools.wb_recommend                        # все кабинеты, файлы в out/recommend/<дата>/
     python -m tools.wb_recommend --accounts skazka --out out/rec
-Загрузка: Джем -> подборка «Рекомендации продавца» -> добавить -> через шаблон Excel. Файл без шапки: A — артикул WB, к которому рекомендуем
-(20 одинаковых строк), B — рекомендуемый артикул WB; до 10000 строк на файл. Рядом лежит <кабинет>_details.csv: слот, артикулы продавца, названия.
+Загрузка: Джем -> подборка «Рекомендации продавца» -> добавить -> через шаблон Excel. Файлы по шаблону WB (шапка, Sheet1): A — артикул WB, к которому рекомендуем
+(20 одинаковых строк), B — рекомендуемый артикул WB; до 1000 строк на файл (лимит окна загрузки), режим загрузки «Заменить». Рядом лежит <кабинет>_details.csv: слот, артикулы продавца, названия.
 
 Запись через API (токен WB_REC_TOKEN_SK/MG/TL, а если его нет, токен склеек, из MARKETPLACE_MERGE_ENV): --apply; --limit N — только первые N карточек (проба); перед записью текущие
 рекомендации сохраняются в <кабинет>_backup.json, вернуть их: --restore <файл> --accounts <кабинет>. Без --apply на WB ничего не пишется.
@@ -34,6 +34,8 @@ from planner.wb_reader import read_imt_members, read_wb_rows
 from recommend.wb import recommend
 from recommend.wb_send import backup, load_backup, read_current, send
 
+TEMPLATE = Path(__file__).resolve().parent.parent / "recommend" / "wb_template.xlsx"
+
 
 def load_cards(rows: list[dict], rolls: dict[str, int], prof: dict) -> list[Card]:
     """Карточки с остатком и известным брендом; ключ размера не обязателен (у декора и карнавала его нет)."""
@@ -59,16 +61,21 @@ def load_cards(rows: list[dict], rolls: dict[str, int], prof: dict) -> list[Card
 
 
 def write_files(acc: str, cards: dict[int, Card], res, out: Path, rows_per_file: int, total: int) -> list[Path]:
-    per_file = max(rows_per_file // total, 1)                    # карточка целиком в одном файле
+    """Файлы по шаблону WB (recommend/wb_template.xlsx: Sheet1, шапка «Артикул WB» / «Связанный артикул WB»), имя template (N).xlsx как у WB."""
+    per_file = max((rows_per_file - 1) // total, 1)              # карточка целиком в одном файле, шапка входит в лимит строк
     targets = sorted(res.recs)
     paths = []
+    (out / acc).mkdir(exist_ok=True)
     for i in range(0, len(targets), per_file):
-        wb = openpyxl.Workbook(write_only=True)
-        ws = wb.create_sheet()
+        wb = openpyxl.load_workbook(TEMPLATE)
+        ws = wb["Sheet1"]
+        row = 2
         for t in targets[i:i + per_file]:
             for nm, _ in res.recs[t]:
-                ws.append([t, nm])
-        p = out / f"{acc}_{i // per_file + 1}.xlsx"
+                ws.cell(row, 1, t)
+                ws.cell(row, 2, nm)
+                row += 1
+        p = out / acc / f"template ({i // per_file + 1}).xlsx"
         wb.save(p)
         paths.append(p)
     with open(out / f"{acc}_details.csv", "w", encoding="utf-8-sig", newline="") as f:
