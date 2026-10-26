@@ -5,7 +5,7 @@
 Загрузка: Джем -> подборка «Рекомендации продавца» -> добавить -> через шаблон Excel. Файл без шапки: A — артикул WB, к которому рекомендуем
 (20 одинаковых строк), B — рекомендуемый артикул WB; до 10000 строк на файл. Рядом лежит <кабинет>_details.csv: слот, артикулы продавца, названия.
 
-Запись через API (токен записи склеек из MARKETPLACE_MERGE_ENV): --apply; --limit N — только первые N карточек (проба); перед записью текущие
+Запись через API (токен WB_REC_TOKEN_SK/MG/TL, а если его нет, токен склеек, из MARKETPLACE_MERGE_ENV): --apply; --limit N — только первые N карточек (проба); перед записью текущие
 рекомендации сохраняются в <кабинет>_backup.json, вернуть их: --restore <файл> --accounts <кабинет>. Без --apply на WB ничего не пишется.
 """
 from __future__ import annotations
@@ -29,7 +29,7 @@ from plan_ozon import database_url
 from plan_wb import CABINETS
 from planner.reader import read_rolls
 from applier.ozon_client import read_env
-from applier.wb_client import api_for, conf, merge_env_path
+from applier.wb_client import ACCOUNT_ENV, api_for, conf, merge_env_path
 from planner.wb_reader import read_imt_members, read_wb_rows
 from recommend.wb import recommend
 from recommend.wb_send import backup, load_backup, read_current, send
@@ -96,6 +96,9 @@ def main() -> None:
     env = read_env(conf("MARKETPLACE_ENV"))
     mp = merge_env_path()
     menv = read_env(mp) if mp else {}
+    for acc, (_, mk) in ACCOUNT_ENV.items():                     # токен записи рекомендаций (WB_REC_TOKEN_…) важнее токена склеек
+        if menv.get(mk.replace("MERGE", "REC")):
+            menv[mk] = menv[mk.replace("MERGE", "REC")]
     if a.restore:
         if len(a.accounts) != 1:
             raise SystemExit("--restore: укажите один кабинет в --accounts")
