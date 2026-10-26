@@ -4,6 +4,9 @@
     python -m tools.wb_recommend --accounts skazka --out out/rec
 Загрузка: Джем -> подборка «Рекомендации продавца» -> добавить -> через шаблон Excel. Файл без шапки: A — артикул WB, к которому рекомендуем
 (20 одинаковых строк), B — рекомендуемый артикул WB; до 10000 строк на файл. Рядом лежит <кабинет>_details.csv: слот, артикулы продавца, названия.
+
+Запись через API (токен записи склеек из MARKETPLACE_MERGE_ENV): --apply; --limit N — только первые N карточек (проба); перед записью текущие
+рекомендации сохраняются в <кабинет>_backup.json, вернуть их: --restore <файл> --accounts <кабинет>. Без --apply на WB ничего не пишется.
 """
 from __future__ import annotations
 
@@ -25,8 +28,11 @@ from gluing.wb.profile import load_profile
 from plan_ozon import database_url
 from plan_wb import CABINETS
 from planner.reader import read_rolls
+from applier.ozon_client import read_env
+from applier.wb_client import api_for, conf, merge_env_path
 from planner.wb_reader import read_imt_members, read_wb_rows
 from recommend.wb import recommend
+from recommend.wb_send import backup, load_backup, read_current, send
 
 
 def load_cards(rows: list[dict], rolls: dict[str, int], prof: dict) -> list[Card]:
@@ -80,9 +86,23 @@ def main() -> None:
     ap.add_argument("--as-of", default=date.today().isoformat())
     ap.add_argument("--accounts", nargs="*", default=list(CABINETS), choices=list(CABINETS))
     ap.add_argument("--out", default="")
+    ap.add_argument("--apply", action="store_true", help="записать рекомендации на WB через API")
+    ap.add_argument("--limit", type=int, default=0, help="с --apply: только первые N карточек")
+    ap.add_argument("--merge", action="store_true", help="с --apply: добавить к старым рекомендациям, а не заменить")
+    ap.add_argument("--restore", default="", help="файл backup.json: вернуть сохранённые рекомендации (один кабинет)")
     a = ap.parse_args()
     out = Path(a.out or Path("out") / "recommend" / a.as_of)
     out.mkdir(parents=True, exist_ok=True)
+    env = read_env(conf("MARKETPLACE_ENV"))
+    mp = merge_env_path()
+    menv = read_env(mp) if mp else {}
+    if a.restore:
+        if len(a.accounts) != 1:
+            raise SystemExit("--restore: укажите один кабинет в --accounts")
+        old = load_backup(Path(a.restore))
+        errs = send(api_for(a.accounts[0], env, menv), old, replace=True)
+        print(f"восстановлено карточек {len(old)}, ошибок WB {len(errs)}")
+        return
     with psycopg.connect(database_url()) as conn:
         rolls = read_rolls(conn)
         for acc in a.accounts:
@@ -98,6 +118,16 @@ def main() -> None:
             slots = Counter(s for v in res.recs.values() for _, s in v)
             print(f"{acc}: карточек с остатком {len(cards)}, с рекомендациями {len(res.recs)}, полных {full}, файлов {len(files)}; "
                   f"слоты {dict(slots)}; не набрано {dict(res.short)}; чаще всего рекомендуем {res.used.most_common(3)}")
+            if a.apply:
+                api = api_for(acc, env, menv)
+                new = {t: [nm for nm, _ in v] for t, v in sorted(res.recs.items())}
+                if a.limit:
+                    new = dict(list(new.items())[:a.limit])
+                cur = read_current(api, set(new))
+                backup(out / f"{acc}_backup.json", cur)
+                errs = send(api, new, replace=not a.merge)
+                print(f"{acc}: записано карточек {len(new)} (до этого с рекомендациями {sum(1 for v in cur.values() if v)}), "
+                      f"ошибок WB {len(errs)}: {errs[:3]}")
 
 
 if __name__ == "__main__":
