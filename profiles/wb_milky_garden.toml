@@ -7,3 +7,6 @@ ruffle_brands = ["Milky Garden"]
 whole_category_brands = {}
 no_eco_brands = []
 use_lists = false
+
+[recommend]
+cdp_port = 9223

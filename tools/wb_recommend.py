@@ -5,6 +5,10 @@
 Загрузка: Джем -> подборка «Рекомендации продавца» -> добавить -> через шаблон Excel. Файлы по шаблону WB (шапка, Sheet1): A — артикул WB, к которому рекомендуем
 (20 одинаковых строк), B — рекомендуемый артикул WB; до 1000 строк на файл (лимит окна загрузки), режим загрузки «Заменить». Рядом лежит <кабинет>_details.csv: слот, артикулы продавца, названия.
 
+Ежедневный режим --jam: считает, сверяет с текущими рекомендациями на WB (/list, ключ чтения), грузит в Джем только изменившиеся карточки через
+Chrome кабинета (порт cdp_port профиля, см. recommend/wb_jam.py), через 2 минуты перепроверяет по /list. Код возврата 1, если кабинет не удалось
+обработать (Chrome не отвечает, нет входа в WB, WB не принял файлы); остальные кабинеты при этом всё равно обрабатываются.
+
 Запись через API (токен WB_REC_TOKEN_SK/MG/TL, а если его нет, токен склеек, из MARKETPLACE_MERGE_ENV): --apply; --limit N — только первые N карточек (проба); перед записью текущие
 рекомендации сохраняются в <кабинет>_backup.json, вернуть их: --restore <файл> --accounts <кабинет>. Без --apply на WB ничего не пишется.
 """
@@ -12,6 +16,9 @@ from __future__ import annotations
 
 import argparse
 import csv
+import json
+import shutil
+import time
 from collections import Counter
 from datetime import date
 from pathlib import Path
@@ -31,7 +38,8 @@ from planner.reader import read_rolls
 from applier.ozon_client import read_env
 from applier.wb_client import ACCOUNT_ENV, api_for, conf, merge_env_path
 from planner.wb_reader import read_imt_members, read_wb_rows
-from recommend.wb import recommend
+from recommend.wb import Result, recommend
+from recommend.wb_jam import JamError, upload
 from recommend.wb_send import backup, load_backup, read_current, send
 
 TEMPLATE = Path(__file__).resolve().parent.parent / "recommend" / "wb_template.xlsx"
@@ -60,12 +68,12 @@ def load_cards(rows: list[dict], rolls: dict[str, int], prof: dict) -> list[Card
     return cards
 
 
-def write_files(acc: str, cards: dict[int, Card], res, out: Path, rows_per_file: int, total: int) -> list[Path]:
+def write_files(acc: str, cards: dict[int, Card], res, out: Path, rows_per_file: int, total: int, folder: str = "") -> list[Path]:
     """Файлы по шаблону WB (recommend/wb_template.xlsx: Sheet1, шапка «Артикул WB» / «Связанный артикул WB»), имя template (N).xlsx как у WB."""
     per_file = max((rows_per_file - 1) // total, 1)              # карточка целиком в одном файле, шапка входит в лимит строк
     targets = sorted(res.recs)
     paths = []
-    (out / acc).mkdir(exist_ok=True)
+    (out / (folder or acc)).mkdir(exist_ok=True)
     for i in range(0, len(targets), per_file):
         wb = openpyxl.load_workbook(TEMPLATE)
         ws = wb["Sheet1"]
@@ -75,9 +83,11 @@ def write_files(acc: str, cards: dict[int, Card], res, out: Path, rows_per_file:
                 ws.cell(row, 1, t)
                 ws.cell(row, 2, nm)
                 row += 1
-        p = out / acc / f"template ({i // per_file + 1}).xlsx"
+        p = out / (folder or acc) / f"template ({i // per_file + 1}).xlsx"
         wb.save(p)
         paths.append(p)
+    if folder:                                                   # файлы на загрузку: подробности ведёт полный расчёт
+        return paths
     with open(out / f"{acc}_details.csv", "w", encoding="utf-8-sig", newline="") as f:
         w = csv.writer(f, delimiter=";")
         w.writerow(["nm_id", "артикул", "категория", "рекомендуем nm_id", "артикул", "категория", "слот", "название"])
@@ -88,6 +98,51 @@ def write_files(acc: str, cards: dict[int, Card], res, out: Path, rows_per_file:
     return paths
 
 
+AUTH_STATE = Path("state") / "wb_jam_auth.json"                  # какой вариант заголовков подошёл в прошлый раз (только имена, без значений)
+VERIFY_WAIT = 120                                                # Джем обрабатывает файлы не мгновенно; потом сверяем по /list
+
+
+def jam_sync(acc: str, prof: dict, res: Result, cards: dict[int, Card], api, out: Path) -> list[str]:
+    """Загружает в Джем кабинета только изменившиеся карточки; возвращает список проблем (пустой = всё в порядке)."""
+    rc = prof["recommend"]
+    new = {t: [nm for nm, _ in v] for t, v in sorted(res.recs.items())}
+    cur = read_current(api)
+    backup(out / f"{acc}_backup.json", cur)
+    changed = {t: v for t, v in new.items() if t in cur and set(cur[t]) != set(v)}      # карточки, которых нет на WB, загрузка не примет
+    print(f"{acc}: к загрузке {len(changed)} из {len(new)} карточек (остальные уже совпадают; нет в списке WB: {sum(1 for t in new if t not in cur)})")
+    if not changed:
+        return []
+    files = write_files(acc, cards, Result(recs={t: res.recs[t] for t in changed}), out, rc["rows_per_file"], rc["total"], folder=f"{acc}_upload")
+    try:
+        hint = json.loads(AUTH_STATE.read_text(encoding="utf-8")).get(acc, "")
+    except (OSError, ValueError):
+        hint = ""
+    try:
+        done = upload(rc["cdp_port"], files, hint=hint, log=lambda m: print(f"{acc}: {m}"))
+    except JamError as e:
+        return [f"{acc}: {e}"]
+    try:
+        AUTH_STATE.parent.mkdir(exist_ok=True)
+        state = json.loads(AUTH_STATE.read_text(encoding="utf-8")) if AUTH_STATE.exists() else {}
+        AUTH_STATE.write_text(json.dumps({**state, acc: done["auth"]}), encoding="utf-8")
+    except (OSError, ValueError):
+        pass
+    problems = [f"{acc}: {r['name']}: {r['error']}" for r in done["results"] if r.get("error")]
+    time.sleep(VERIFY_WAIT)
+    now = read_current(api, set(changed))
+    ok = sum(1 for t, v in changed.items() if set(now.get(t, [])) == set(v))
+    print(f"{acc}: загружено файлов {len(done['results']) - len(problems)} из {len(files)}, на WB совпало {ok} из {len(changed)} карточек")
+    if ok < len(changed) * 0.5:
+        problems.append(f"{acc}: на WB совпало только {ok} из {len(changed)} карточек после загрузки (смотрите историю загрузок в Джеме)")
+    return problems
+
+
+def prune(root: Path, keep_days: int = 14) -> None:
+    for d in root.iterdir() if root.exists() else []:
+        if d.is_dir() and time.time() - d.stat().st_mtime > keep_days * 86400:
+            shutil.rmtree(d, ignore_errors=True)
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--as-of", default=date.today().isoformat())
@@ -95,6 +150,7 @@ def main() -> None:
     ap.add_argument("--out", default="")
     ap.add_argument("--apply", action="store_true", help="записать рекомендации на WB через API")
     ap.add_argument("--limit", type=int, default=0, help="с --apply: только первые N карточек")
+    ap.add_argument("--jam", action="store_true", help="ежедневный режим: загрузить изменившиеся рекомендации в Джем через Chrome кабинета")
     ap.add_argument("--merge", action="store_true", help="с --apply: добавить к старым рекомендациям, а не заменить")
     ap.add_argument("--restore", default="", help="файл backup.json: вернуть сохранённые рекомендации (один кабинет)")
     a = ap.parse_args()
@@ -113,6 +169,9 @@ def main() -> None:
         errs = send(api_for(a.accounts[0], env, menv), old, replace=True)
         print(f"восстановлено карточек {len(old)}, ошибок WB {len(errs)}")
         return
+    problems: list[str] = []
+    if a.jam:
+        prune(out.parent)
     with psycopg.connect(database_url()) as conn:
         rolls = read_rolls(conn)
         for acc in a.accounts:
@@ -138,6 +197,11 @@ def main() -> None:
                 errs = send(api, new, replace=not a.merge)
                 print(f"{acc}: записано карточек {len(new)} (до этого с рекомендациями {sum(1 for v in cur.values() if v)}), "
                       f"ошибок WB {len(errs)}: {errs[:3]}")
+            if a.jam:
+                problems += jam_sync(acc, prof, res, {c.nm_id: c for c in cards}, api_for(acc, env, menv), out)
+    if problems:
+        print("ПРОБЛЕМЫ:", *problems, sep="\n")
+        raise SystemExit(1)
 
 
 if __name__ == "__main__":
