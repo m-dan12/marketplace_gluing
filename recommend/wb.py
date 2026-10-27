@@ -67,8 +67,9 @@ class _Pool:
             self.by_design[c.design].append(c)
 
 
-def recommend(cards: list[Card], imt: dict[int, int], prof: dict, eco: frozenset[str] | None = None) -> Result:
-    """cards — только карточки с остатком одного кабинета; imt — {nm_id: imtID} (карточки одной склейки друг другу не рекомендуем)."""
+def recommend(cards: list[Card], imt: dict[int, int], prof: dict, eco: frozenset[str] | None = None, eligible: set[int] | None = None) -> Result:
+    """cards — только карточки с остатком одного кабинета; imt — {nm_id: imtID} (карточки одной склейки друг другу не рекомендуем).
+    eligible — какие карточки можно рекомендовать (None: все); рекомендации получают все карточки, в том числе новые, которых WB пока не принимает как рекомендуемые."""
     rc = prof["recommend"]
     total, window = rc["total"], rc["rotation"]
     eco = eco if eco is not None else frozenset()
@@ -80,10 +81,11 @@ def recommend(cards: list[Card], imt: dict[int, int], prof: dict, eco: frozenset
         if g is None or c.stock_total <= 0:
             continue
         k = _pool_key(c, g, prof, eco)
-        members[k].append(c)
+        if eligible is None or c.nm_id in eligible:
+            members[k].append(c)
         keyed.append((c, g, k))
-    for k, cs in members.items():
-        pools[k] = _Pool(cs, prof)
+    for k in {k for _, _, k in keyed}:
+        pools[k] = _Pool(members.get(k, []), prof)
 
     res = Result()
     used = res.used

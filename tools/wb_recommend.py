@@ -98,8 +98,30 @@ def write_files(acc: str, cards: dict[int, Card], res, out: Path, rows_per_file:
     return paths
 
 
+KNOWN_STATE = Path("state") / "wb_rec_known.json"                # {кабинет: {nm_id: дата, когда карточка впервые попала в список рекомендаций WB}}
 AUTH_STATE = Path("state") / "wb_jam_auth.json"                  # какой вариант заголовков подошёл в прошлый раз (только имена, без значений)
 VERIFY_WAIT = 120                                                # Джем обрабатывает файлы не мгновенно; потом сверяем по /list
+
+
+def eligible_ids(acc: str, known: dict[int, list[int]], today: str) -> set[int]:
+    """Какие карточки можно рекомендовать: те, что WB уже знал в прошлые дни. Только что оприходованная карточка получает свои рекомендации сразу,
+    но как рекомендуемую WB её принимает не сразу (отклоняет), поэтому в чужие рекомендации она попадает со следующего дня."""
+    try:
+        state = json.loads(KNOWN_STATE.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        state = {}
+    seen = state.get(acc)
+    if seen is None:
+        seen = {str(n): "" for n in known}                       # первый запуск: всё, что уже есть в списке, считаем давно известным
+    seen = {n: d for n, d in seen.items() if int(n) in known}
+    for n in known:
+        seen.setdefault(str(n), today)
+    try:
+        KNOWN_STATE.parent.mkdir(exist_ok=True)
+        KNOWN_STATE.write_text(json.dumps({**state, acc: seen}), encoding="utf-8")
+    except OSError:
+        pass
+    return {int(n) for n, d in seen.items() if d < today}
 
 
 def jam_sync(acc: str, prof: dict, res: Result, cards: dict[int, Card], api, out: Path, cur: dict[int, list[int]]) -> list[str]:
@@ -107,7 +129,7 @@ def jam_sync(acc: str, prof: dict, res: Result, cards: dict[int, Card], api, out
     rc = prof["recommend"]
     new = {t: [nm for nm, _ in v] for t, v in sorted(res.recs.items())}
     backup(out / f"{acc}_backup.json", cur)
-    changed = {t: v for t, v in new.items() if t in cur and set(cur[t]) != set(v)}      # карточки, которых нет на WB, загрузка не примет
+    changed = {t: v for t, v in new.items() if set(cur.get(t, [])) != set(v)}       # карточки, которых ещё нет в списке WB, тоже грузим: WB их принимает и добавляет в список
     print(f"{acc}: к загрузке {len(changed)} из {len(new)} карточек (остальные уже совпадают)")
     if not changed:
         return []
@@ -178,12 +200,13 @@ def main() -> None:
             rows = read_wb_rows(conn, acc, a.as_of, prof.get("stock", {}).get("wb_mode", "all_physical"))
             cards = load_cards(rows, rolls, prof)
             known: dict[int, list[int]] = {}
-            if a.jam:                                                # WB принимает рекомендации только для карточек из его списка (новые карточки там появляются не сразу)
+            eligible = None
+            if a.jam:
                 known = read_current(api_for(acc, env, menv))
-                cards = [c for c in cards if c.nm_id in known]
+                eligible = eligible_ids(acc, known, a.as_of)
             imt = {nm: i for i, nms in read_imt_members(conn, acc).items() for nm in nms}
             use = prof["rules"].get("use_lists", True)
-            res = recommend(cards, imt, prof, eco_designs() if use else frozenset())
+            res = recommend(cards, imt, prof, eco_designs() if use else frozenset(), eligible)
             total = prof["recommend"]["total"]
             files = write_files(acc, {c.nm_id: c for c in cards}, res, out, prof["recommend"]["rows_per_file"], total)
             full = sum(len(v) == total for v in res.recs.values())
