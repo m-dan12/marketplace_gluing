@@ -133,7 +133,7 @@ def jam_sync(acc: str, prof: dict, res: Result, cards: dict[int, Card], api, out
     rc = prof["recommend"]
     new = {t: [nm for nm, _ in v] for t, v in sorted(res.recs.items())}
     backup(out / f"{acc}_backup.json", cur)
-    changed = {t: v for t, v in new.items() if v and set(cur.get(t, [])) != set(v)}   # карточки, которых ещё нет в списке WB, тоже грузим: WB их принимает и добавляет в список
+    changed = {t: v for t, v in new.items() if v and cur.get(t, []) != v}   # карточки, которых ещё нет в списке WB, тоже грузим: WB их принимает и добавляет в список
     clear = {t: cur[t] for t, v in new.items() if not v and cur.get(t)}                # подобрать нечего, а на WB стоят старые (чужие) рекомендации: убираем
     print(f"{acc}: к загрузке {len(changed)} из {len(new)} карточек (остальные уже совпадают), к очистке {len(clear)}")
     stats = {"changed": len(changed) + len(clear), "matched": 0, "files": 0}

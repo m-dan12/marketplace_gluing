@@ -70,3 +70,9 @@ def test_no_stock_not_recommended():
     res = recommend(cards, {}, PROF)
     assert cards[5].nm_id not in res.recs
     assert all(nm != cards[5].nm_id for v in res.recs.values() for nm, _ in v)
+
+
+def test_new_items_come_first_in_every_list():
+    res = recommend(world(90), {}, PROF)
+    for items in res.recs.values():
+        assert [s for _, s in items][:2] == ["new", "new"]

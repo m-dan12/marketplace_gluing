@@ -81,7 +81,7 @@ max_ops = 1500
 kill_file = "logs/AUTOAPPLY_OFF"
 
 # Рекомендации продавца (tools/wb_recommend.py): до total артикулов на карточку с остатком, по слотам из slots (порядок слотов = порядок набора;
-# что не набралось, добивается любыми карточками группы). rotation — из скольких лучших кандидатов на слот выбираем наименее использованных.
+# что не набралось, добивается любыми карточками группы). Новинки (new) стоят первыми: в списке WB они идут в самом начале. rotation — из скольких лучших кандидатов на слот выбираем наименее использованных.
 [recommend]
 total = 20
 rotation = 5
@@ -93,18 +93,18 @@ decor_categories = ["Шторы интерьерные", "Скатерти", "Н
 brand_classes = [["Сказка", "Сказка Сатин", "Анна Мария"], ["Мечта"]]
 
 [recommend.bedding]
-slots = { design = 8, top = 4, ruffle = 2, dead = 2, rhomb = 2, new = 2 }
+slots = { new = 2, design = 8, top = 4, ruffle = 2, dead = 2, rhomb = 2 }
 
 [recommend.decor]
-slots = { design = 8, top = 4, dead = 4, new = 4 }
+slots = { new = 3, design = 8, top = 5, dead = 4 }
 design_all = true
 fill_same_category = true
 
 [recommend.fabric]
-slots = { design = 10, top = 4, dead = 3, new = 3 }
+slots = { new = 3, design = 10, top = 4, dead = 3 }
 fill_same_category = true
 
 [recommend.carnival]
-slots = { design = 8, top = 6, dead = 4, new = 2 }
+slots = { new = 2, design = 8, top = 6, dead = 4 }
 design_all = true
 fill_same_category = true
