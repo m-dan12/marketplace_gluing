@@ -98,11 +98,12 @@ def test_jam_sync_uploads_only_changed_cards_known_to_wb(tmp_path, monkeypatch):
         seen["n"] = len(files)
         return {"auth": "a|b", "results": [{"name": f.name, "task": 1} for f in files]}
     wr, prof, res = _setup(tmp_path, monkeypatch, {1: [10, 11], 2: [10, 99]}, fake_upload)   # 1 совпала, 2 изменилась, 3 нет на WB
-    calls = iter([{1: [10, 11], 2: [10, 99]}, {2: [10, 12]}])
+    cur = {1: [10, 11], 2: [10, 99]}
+    calls = iter([{2: [10, 12]}])
     monkeypatch.setattr(wr, "read_current", lambda api, nms=None: next(calls))
     out = tmp_path / "out"
     out.mkdir()
-    problems = wr.jam_sync("skazka", prof, res, {}, None, out)
+    problems = wr.jam_sync("skazka", prof, res, {}, None, out, cur)
     assert problems == [] and seen["n"] == 1
     import openpyxl
     rows = list(openpyxl.load_workbook(out / "skazka_upload" / "template (1).xlsx", read_only=True).active.iter_rows(min_row=2, values_only=True))
@@ -111,9 +112,10 @@ def test_jam_sync_uploads_only_changed_cards_known_to_wb(tmp_path, monkeypatch):
 
 def test_jam_sync_reports_file_errors_and_unconfirmed(tmp_path, monkeypatch):
     wr, prof, res = _setup(tmp_path, monkeypatch, {}, lambda files: {"auth": "a|b", "results": [{"name": files[0].name, "error": "upload 500"}]})
-    calls = iter([{1: [99], 2: [99]}, {1: [99], 2: [99]}])
+    cur = {1: [99], 2: [99]}
+    calls = iter([{1: [99], 2: [99]}])
     monkeypatch.setattr(wr, "read_current", lambda api, nms=None: next(calls))
     out = tmp_path / "out"
     out.mkdir()
-    problems = wr.jam_sync("skazka", prof, res, {}, None, out)
+    problems = wr.jam_sync("skazka", prof, res, {}, None, out, cur)
     assert any("upload 500" in p for p in problems) and any("совпало только 0 из 2" in p for p in problems)

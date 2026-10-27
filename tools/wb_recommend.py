@@ -102,14 +102,13 @@ AUTH_STATE = Path("state") / "wb_jam_auth.json"                  # какой в
 VERIFY_WAIT = 120                                                # Джем обрабатывает файлы не мгновенно; потом сверяем по /list
 
 
-def jam_sync(acc: str, prof: dict, res: Result, cards: dict[int, Card], api, out: Path) -> list[str]:
+def jam_sync(acc: str, prof: dict, res: Result, cards: dict[int, Card], api, out: Path, cur: dict[int, list[int]]) -> list[str]:
     """Загружает в Джем кабинета только изменившиеся карточки; возвращает список проблем (пустой = всё в порядке)."""
     rc = prof["recommend"]
     new = {t: [nm for nm, _ in v] for t, v in sorted(res.recs.items())}
-    cur = read_current(api)
     backup(out / f"{acc}_backup.json", cur)
     changed = {t: v for t, v in new.items() if t in cur and set(cur[t]) != set(v)}      # карточки, которых нет на WB, загрузка не примет
-    print(f"{acc}: к загрузке {len(changed)} из {len(new)} карточек (остальные уже совпадают; нет в списке WB: {sum(1 for t in new if t not in cur)})")
+    print(f"{acc}: к загрузке {len(changed)} из {len(new)} карточек (остальные уже совпадают)")
     if not changed:
         return []
     files = write_files(acc, cards, Result(recs={t: res.recs[t] for t in changed}), out, rc["rows_per_file"], rc["total"], folder=f"{acc}_upload")
@@ -178,6 +177,10 @@ def main() -> None:
             prof = load_profile(CABINETS[acc])
             rows = read_wb_rows(conn, acc, a.as_of, prof.get("stock", {}).get("wb_mode", "all_physical"))
             cards = load_cards(rows, rolls, prof)
+            known: dict[int, list[int]] = {}
+            if a.jam:                                                # WB принимает рекомендации только для карточек из его списка (новые карточки там появляются не сразу)
+                known = read_current(api_for(acc, env, menv))
+                cards = [c for c in cards if c.nm_id in known]
             imt = {nm: i for i, nms in read_imt_members(conn, acc).items() for nm in nms}
             use = prof["rules"].get("use_lists", True)
             res = recommend(cards, imt, prof, eco_designs() if use else frozenset())
@@ -198,7 +201,7 @@ def main() -> None:
                 print(f"{acc}: записано карточек {len(new)} (до этого с рекомендациями {sum(1 for v in cur.values() if v)}), "
                       f"ошибок WB {len(errs)}: {errs[:3]}")
             if a.jam:
-                problems += jam_sync(acc, prof, res, {c.nm_id: c for c in cards}, api_for(acc, env, menv), out)
+                problems += jam_sync(acc, prof, res, {c.nm_id: c for c in cards}, api_for(acc, env, menv), out, known)
     if problems:
         print("ПРОБЛЕМЫ:", *problems, sep="\n")
         raise SystemExit(1)
