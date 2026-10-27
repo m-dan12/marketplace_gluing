@@ -85,7 +85,7 @@ def _setup(tmp_path, monkeypatch, cur, upload_result):
     res = Result(recs={1: [(10, "top"), (11, "new")], 2: [(10, "top"), (12, "new")], 3: [(11, "top")]})
     state = {"now": cur}
     monkeypatch.setattr(wr, "read_current", lambda api, nms=None: state["now"])
-    monkeypatch.setattr(wr, "upload", lambda port, files, hint="", log=print: upload_result(files))
+    monkeypatch.setattr(wr, "upload", lambda port, files, action="replace", hint="", log=print: upload_result(files))
     monkeypatch.setattr(wr, "time", type("T", (), {"sleep": staticmethod(lambda s: None), "time": staticmethod(lambda: 0)}))
     monkeypatch.setattr(wr, "AUTH_STATE", tmp_path / "state" / "auth.json")
     return wr, prof, res
@@ -154,3 +154,17 @@ def test_few_unmatched_cards_do_not_fail_the_run(tmp_path, monkeypatch):
     out.mkdir()
     problems, actual, stats = wr.jam_sync("skazka", prof, res, {}, None, out, {1: [99], 2: [99], 3: [99]})
     assert problems == [] and stats["matched"] == 0 and stats["changed"] == 3
+
+
+def test_empty_calculation_clears_stale_recommendations_with_delete(tmp_path, monkeypatch):
+    from recommend.wb import Result
+    wr, prof, _ = _setup(tmp_path, monkeypatch, {}, lambda files: {"auth": "a|b", "results": [{"name": f.name} for f in files]})
+    actions = []
+    monkeypatch.setattr(wr, "upload", lambda port, files, action="replace", hint="", log=print: actions.append(action) or {"auth": "a|b", "results": []})
+    res = Result(recs={7: [], 8: [(10, "top")]})
+    calls = iter([{7: [], 8: [10]}])
+    monkeypatch.setattr(wr, "read_current", lambda api, nms=None: next(calls))
+    out = tmp_path / "out"
+    out.mkdir()
+    problems, _, stats = wr.jam_sync("milky_garden", prof, res, {}, None, out, {7: [1, 2, 3], 8: [10]})
+    assert actions == ["delete"] and problems == [] and stats["changed"] == 1 and stats["matched"] == 1

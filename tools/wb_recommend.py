@@ -133,34 +133,44 @@ def jam_sync(acc: str, prof: dict, res: Result, cards: dict[int, Card], api, out
     rc = prof["recommend"]
     new = {t: [nm for nm, _ in v] for t, v in sorted(res.recs.items())}
     backup(out / f"{acc}_backup.json", cur)
-    changed = {t: v for t, v in new.items() if set(cur.get(t, [])) != set(v)}       # карточки, которых ещё нет в списке WB, тоже грузим: WB их принимает и добавляет в список
-    print(f"{acc}: к загрузке {len(changed)} из {len(new)} карточек (остальные уже совпадают)")
-    stats = {"changed": len(changed), "matched": 0, "files": 0}
-    if not changed:
+    changed = {t: v for t, v in new.items() if v and set(cur.get(t, [])) != set(v)}   # карточки, которых ещё нет в списке WB, тоже грузим: WB их принимает и добавляет в список
+    clear = {t: cur[t] for t, v in new.items() if not v and cur.get(t)}                # подобрать нечего, а на WB стоят старые (чужие) рекомендации: убираем
+    print(f"{acc}: к загрузке {len(changed)} из {len(new)} карточек (остальные уже совпадают), к очистке {len(clear)}")
+    stats = {"changed": len(changed) + len(clear), "matched": 0, "files": 0}
+    if not changed and not clear:
         return [], cur, stats
-    files = write_files(acc, cards, Result(recs={t: res.recs[t] for t in changed}), out, rc["rows_per_file"], rc["total"], folder=f"{acc}_upload")
     try:
         hint = json.loads(AUTH_STATE.read_text(encoding="utf-8")).get(acc, "")
     except (OSError, ValueError):
         hint = ""
-    try:
-        done = upload(rc["cdp_port"], files, hint=hint, log=lambda m: print(f"{acc}: {m}"))
-    except JamError as e:
-        return [f"{acc}: {e}"], cur, stats
+    problems: list[str] = []
+    n_files = 0
+    for action, folder, recs in (("replace", f"{acc}_upload", {t: res.recs[t] for t in changed}),
+                                 ("delete", f"{acc}_clear", {t: [(r, "") for r in lst] for t, lst in clear.items()})):
+        if not recs:
+            continue
+        files = write_files(acc, cards, Result(recs=recs), out, rc["rows_per_file"], rc["total"], folder=folder)
+        try:
+            done = upload(rc["cdp_port"], files, action=action, hint=hint, log=lambda m: print(f"{acc}: {m}"))
+        except JamError as e:
+            return [f"{acc}: {e}"], cur, stats
+        hint = done["auth"]
+        problems += [f"{acc}: {r['name']}: {r['error']}" for r in done["results"] if r.get("error")]
+        n_files += len(files)
     try:
         AUTH_STATE.parent.mkdir(exist_ok=True)
         state = json.loads(AUTH_STATE.read_text(encoding="utf-8")) if AUTH_STATE.exists() else {}
-        AUTH_STATE.write_text(json.dumps({**state, acc: done["auth"]}), encoding="utf-8")
+        AUTH_STATE.write_text(json.dumps({**state, acc: hint}), encoding="utf-8")
     except (OSError, ValueError):
         pass
-    problems = [f"{acc}: {r['name']}: {r['error']}" for r in done["results"] if r.get("error")]
     time.sleep(VERIFY_WAIT)
     now = read_current(api)
-    ok = sum(1 for t, v in changed.items() if set(now.get(t, [])) == set(v))
-    stats.update(matched=ok, files=len(files))
-    print(f"{acc}: загружено файлов {len(done['results']) - len(problems)} из {len(files)}, на WB совпало {ok} из {len(changed)} карточек")
-    if len(changed) - ok > max(UNMATCHED_MIN, UNMATCHED_SHARE * len(changed)):
-        problems.append(f"{acc}: на WB совпало только {ok} из {len(changed)} карточек после загрузки (смотрите историю загрузок в Джеме)")
+    expect = {**changed, **{t: [] for t in clear}}
+    ok = sum(1 for t, v in expect.items() if set(now.get(t, [])) == set(v))
+    stats.update(matched=ok, files=n_files)
+    print(f"{acc}: загружено файлов {n_files}, на WB совпало {ok} из {len(expect)} карточек")
+    if len(expect) - ok > max(UNMATCHED_MIN, UNMATCHED_SHARE * len(expect)):
+        problems.append(f"{acc}: на WB совпало только {ok} из {len(expect)} карточек после загрузки (смотрите историю загрузок в Джеме)")
     return problems, now, stats
 
 

@@ -69,8 +69,8 @@ def summary(acc: str, rep: Report, stats: dict) -> tuple[str, str, str]:
     """(уровень, заголовок, текст) для дашборда."""
     mark = lambda n: "✓" if not n else "✗"
     lines = [
-        f"{mark(0)} Загружено в Джем: {stats.get('changed', 0)} карточек, совпало на WB {stats.get('matched', 0)}" if stats.get("changed")
-        else f"{mark(0)} Изменений не потребовалось: на WB уже стоят актуальные рекомендации",
+        f"• Загружено в Джем: {stats.get('changed', 0)} карточек, на WB совпало {stats.get('matched', 0)}" if stats.get("changed")
+        else "• Изменений не потребовалось: на WB уже стоят актуальные рекомендации",
         f"{mark(rep.no_recs)} Карточек с остатком без рекомендаций: {len(rep.no_recs)} из {rep.targets}",
         f"{mark(rep.no_stock)} Рекомендаций на артикулы без остатка: {len(rep.no_stock)}",
         f"{mark(rep.rules)} Нарушений правил (бренд, эко, склейка, категории): {len(rep.rules)}",
