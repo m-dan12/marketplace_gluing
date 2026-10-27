@@ -20,7 +20,7 @@ import json
 import shutil
 import time
 from collections import Counter
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
 
 import openpyxl
@@ -38,6 +38,8 @@ from planner.reader import read_rolls
 from applier.ozon_client import read_env
 from applier.wb_client import ACCOUNT_ENV, api_for, conf, merge_env_path
 from planner.wb_reader import read_imt_members, read_wb_rows
+from ops.notify import OpsMonitor
+from recommend.report import TITLES, build_report, summary, write_xlsx
 from recommend.wb import Result, recommend
 from recommend.wb_jam import JamError, upload
 from recommend.wb_send import backup, load_backup, read_current, send
@@ -124,15 +126,17 @@ def eligible_ids(acc: str, known: dict[int, list[int]], today: str) -> set[int]:
     return {int(n) for n, d in seen.items() if d < today}
 
 
-def jam_sync(acc: str, prof: dict, res: Result, cards: dict[int, Card], api, out: Path, cur: dict[int, list[int]]) -> list[str]:
-    """Загружает в Джем кабинета только изменившиеся карточки; возвращает список проблем (пустой = всё в порядке)."""
+def jam_sync(acc: str, prof: dict, res: Result, cards: dict[int, Card], api, out: Path, cur: dict[int, list[int]]) -> tuple[list[str], dict, dict]:
+    """Загружает в Джем кабинета только изменившиеся карточки; возвращает (проблемы, состояние рекомендаций на WB после загрузки, итоги).
+    Пустые проблемы = рекомендации заполнены."""
     rc = prof["recommend"]
     new = {t: [nm for nm, _ in v] for t, v in sorted(res.recs.items())}
     backup(out / f"{acc}_backup.json", cur)
     changed = {t: v for t, v in new.items() if set(cur.get(t, [])) != set(v)}       # карточки, которых ещё нет в списке WB, тоже грузим: WB их принимает и добавляет в список
     print(f"{acc}: к загрузке {len(changed)} из {len(new)} карточек (остальные уже совпадают)")
+    stats = {"changed": len(changed), "matched": 0, "files": 0}
     if not changed:
-        return []
+        return [], cur, stats
     files = write_files(acc, cards, Result(recs={t: res.recs[t] for t in changed}), out, rc["rows_per_file"], rc["total"], folder=f"{acc}_upload")
     try:
         hint = json.loads(AUTH_STATE.read_text(encoding="utf-8")).get(acc, "")
@@ -141,7 +145,7 @@ def jam_sync(acc: str, prof: dict, res: Result, cards: dict[int, Card], api, out
     try:
         done = upload(rc["cdp_port"], files, hint=hint, log=lambda m: print(f"{acc}: {m}"))
     except JamError as e:
-        return [f"{acc}: {e}"]
+        return [f"{acc}: {e}"], cur, stats
     try:
         AUTH_STATE.parent.mkdir(exist_ok=True)
         state = json.loads(AUTH_STATE.read_text(encoding="utf-8")) if AUTH_STATE.exists() else {}
@@ -150,12 +154,46 @@ def jam_sync(acc: str, prof: dict, res: Result, cards: dict[int, Card], api, out
         pass
     problems = [f"{acc}: {r['name']}: {r['error']}" for r in done["results"] if r.get("error")]
     time.sleep(VERIFY_WAIT)
-    now = read_current(api, set(changed))
+    now = read_current(api)
     ok = sum(1 for t, v in changed.items() if set(now.get(t, [])) == set(v))
+    stats.update(matched=ok, files=len(files))
     print(f"{acc}: загружено файлов {len(done['results']) - len(problems)} из {len(files)}, на WB совпало {ok} из {len(changed)} карточек")
     if ok < len(changed) * 0.5:
         problems.append(f"{acc}: на WB совпало только {ok} из {len(changed)} карточек после загрузки (смотрите историю загрузок в Джеме)")
-    return problems
+    return problems, now, stats
+
+
+def notice(level: str, title: str, text: str, key: str) -> None:
+    """Сообщение в дашборд Ops Monitor (если настроен OPSMON_URL/OPSMON_TOKEN); сбой отправки не должен ронять запуск."""
+    print(f"[{level}] {title}", text, sep="\n")
+    url, token = conf("OPSMON_URL"), conf("OPSMON_TOKEN")
+    if not (url and token):
+        return
+    try:
+        OpsMonitor(url, token, conf("OPSMON_HOST_ID") or "proftex-server", source="рекомендации WB").send(level, title, text, key)
+    except Exception as e:                                       # noqa: BLE001
+        print(f"дашборд недоступен: {e}")
+
+
+REPORT_DIR = Path("out") / "recommend"                            # report_<кабинет>.xlsx: только последний успешный запуск
+
+
+def finish_jam(acc: str, prof: dict, res: Result, cards: list[Card], imt: dict[int, int], api, out: Path, known: dict, eco: frozenset[str]) -> list[str]:
+    """Загрузка + отчёт. Прежний отчёт кабинета удаляется сразу: если рекомендации не заполнились, отчёта нет (и в дашборд уходит сообщение об ошибке)."""
+    report = REPORT_DIR / f"report_{acc}.xlsx"
+    report.unlink(missing_ok=True)
+    by_nm = {c.nm_id: c for c in cards}
+    problems, actual, stats = jam_sync(acc, prof, res, by_nm, api, out, known)
+    stamp = datetime.now().strftime("%Y%m%d-%H%M")
+    if problems:
+        notice("error", f"Рекомендации WB, {TITLES[acc]}: не заполнены", "\n".join(problems)[:3500], f"wb-rec-{acc}-{stamp}")
+        return problems
+    rep = build_report(actual, by_nm, imt, prof, eco)
+    level, title, text = summary(acc, rep, stats)
+    REPORT_DIR.mkdir(parents=True, exist_ok=True)
+    write_xlsx(report, acc, rep, by_nm, text)
+    notice(level, title, f"{text}\nПодробности: {report}", f"wb-rec-{acc}-{stamp}")
+    return []
 
 
 def prune(root: Path, keep_days: int = 14) -> None:
@@ -224,7 +262,7 @@ def main() -> None:
                 print(f"{acc}: записано карточек {len(new)} (до этого с рекомендациями {sum(1 for v in cur.values() if v)}), "
                       f"ошибок WB {len(errs)}: {errs[:3]}")
             if a.jam:
-                problems += jam_sync(acc, prof, res, {c.nm_id: c for c in cards}, api_for(acc, env, menv), out, known)
+                problems += finish_jam(acc, prof, res, cards, imt, api_for(acc, env, menv), out, known, eco_designs() if use else frozenset())
     if problems:
         print("ПРОБЛЕМЫ:", *problems, sep="\n")
         raise SystemExit(1)

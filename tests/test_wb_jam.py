@@ -103,8 +103,8 @@ def test_jam_sync_uploads_changed_and_new_cards(tmp_path, monkeypatch):
     monkeypatch.setattr(wr, "read_current", lambda api, nms=None: next(calls))
     out = tmp_path / "out"
     out.mkdir()
-    problems = wr.jam_sync("skazka", prof, res, {}, None, out, cur)
-    assert problems == [] and seen["n"] == 1
+    problems, actual, stats = wr.jam_sync("skazka", prof, res, {}, None, out, cur)
+    assert problems == [] and seen["n"] == 1 and stats["changed"] == 2 and actual == {2: [10, 12], 3: [11]}
     import openpyxl
     rows = list(openpyxl.load_workbook(out / "skazka_upload" / "template (1).xlsx", read_only=True).active.iter_rows(min_row=2, values_only=True))
     assert {r[0] for r in rows if r[0]} == {2, 3}
@@ -117,7 +117,7 @@ def test_jam_sync_reports_file_errors_and_unconfirmed(tmp_path, monkeypatch):
     monkeypatch.setattr(wr, "read_current", lambda api, nms=None: next(calls))
     out = tmp_path / "out"
     out.mkdir()
-    problems = wr.jam_sync("skazka", prof, res, {}, None, out, cur)
+    problems, _, _ = wr.jam_sync("skazka", prof, res, {}, None, out, cur)
     assert any("upload 500" in p for p in problems) and any("совпало только 0 из 3" in p for p in problems)
 
 
