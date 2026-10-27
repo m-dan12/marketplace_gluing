@@ -117,6 +117,7 @@ def test_jam_sync_reports_file_errors_and_unconfirmed(tmp_path, monkeypatch):
     monkeypatch.setattr(wr, "read_current", lambda api, nms=None: next(calls))
     out = tmp_path / "out"
     out.mkdir()
+    monkeypatch.setattr(wr, "UNMATCHED_MIN", 0)
     problems, _, _ = wr.jam_sync("skazka", prof, res, {}, None, out, cur)
     assert any("upload 500" in p for p in problems) and any("совпало только 0 из 3" in p for p in problems)
 
@@ -143,3 +144,13 @@ def test_eligible_ids_waits_one_day_for_new_cards(tmp_path, monkeypatch):
     assert wr.eligible_ids("skazka", {1: [], 2: []}, "2026-10-27") == {1, 2}           # первый запуск: всё известное считаем давним
     assert wr.eligible_ids("skazka", {1: [], 2: [], 3: []}, "2026-10-28") == {1, 2}     # 3 появилась сегодня
     assert wr.eligible_ids("skazka", {1: [], 2: [], 3: []}, "2026-10-29") == {1, 2, 3}
+
+
+def test_few_unmatched_cards_do_not_fail_the_run(tmp_path, monkeypatch):
+    wr, prof, res = _setup(tmp_path, monkeypatch, {}, lambda files: {"auth": "a|b", "results": [{"name": f.name, "task": 1} for f in files]})
+    calls = iter([{1: [99], 2: [99], 3: [99]}])
+    monkeypatch.setattr(wr, "read_current", lambda api, nms=None: next(calls))
+    out = tmp_path / "out"
+    out.mkdir()
+    problems, actual, stats = wr.jam_sync("skazka", prof, res, {}, None, out, {1: [99], 2: [99], 3: [99]})
+    assert problems == [] and stats["matched"] == 0 and stats["changed"] == 3

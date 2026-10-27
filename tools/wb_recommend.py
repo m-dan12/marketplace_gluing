@@ -102,7 +102,8 @@ def write_files(acc: str, cards: dict[int, Card], res, out: Path, rows_per_file:
 
 KNOWN_STATE = Path("state") / "wb_rec_known.json"                # {кабинет: {nm_id: дата, когда карточка впервые попала в список рекомендаций WB}}
 AUTH_STATE = Path("state") / "wb_jam_auth.json"                  # какой вариант заголовков подошёл в прошлый раз (только имена, без значений)
-VERIFY_WAIT = 120                                                # Джем обрабатывает файлы не мгновенно; потом сверяем по /list
+UNMATCHED_MIN, UNMATCHED_SHARE = 10, 0.2                         # заполнение считается неудачным, если не совпало больше max(10 карточек, 20% загруженных)
+VERIFY_WAIT = 120                                               # Джем обрабатывает файлы не мгновенно; потом сверяем по /list
 
 
 def eligible_ids(acc: str, known: dict[int, list[int]], today: str) -> set[int]:
@@ -158,7 +159,7 @@ def jam_sync(acc: str, prof: dict, res: Result, cards: dict[int, Card], api, out
     ok = sum(1 for t, v in changed.items() if set(now.get(t, [])) == set(v))
     stats.update(matched=ok, files=len(files))
     print(f"{acc}: загружено файлов {len(done['results']) - len(problems)} из {len(files)}, на WB совпало {ok} из {len(changed)} карточек")
-    if ok < len(changed) * 0.5:
+    if len(changed) - ok > max(UNMATCHED_MIN, UNMATCHED_SHARE * len(changed)):
         problems.append(f"{acc}: на WB совпало только {ok} из {len(changed)} карточек после загрузки (смотрите историю загрузок в Джеме)")
     return problems, now, stats
 
