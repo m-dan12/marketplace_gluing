@@ -36,7 +36,7 @@ def test_upload_batches_files_and_closes_chrome(tmp_path, monkeypatch):
         files.append(f)
     out = upload(9223, files, log=lambda m: None)
     ch = FakeChrome.instances[0]
-    assert [len(c) for c in ch.calls] == [4, 4, 1] and ch.closed and ch.port == 9223
+    assert [len(c) for c in ch.calls] == [wb_jam.BATCH] * (9 // wb_jam.BATCH) + [9 % wb_jam.BATCH] * (9 % wb_jam.BATCH > 0) and ch.closed and ch.port == 9223
     assert len(out["results"]) == 9 and out["auth"].startswith("portal.seller-token")
 
 

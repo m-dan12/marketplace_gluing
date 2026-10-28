@@ -278,3 +278,24 @@ def test_child_outranks_eco():
     kids = [card(7000 + i, "4-13-26", cat=KPB, prefix="PT") for i in range(10)]
     res = build_wb(kids, {}, {}, prof, ctx, solver="greedy")
     assert [g.bid for g in res.groups] == ["child"]                       # детский дизайн из списка эко остаётся в детских
+
+
+def _pil(design, key, cm, prefix="MY"):
+    c = card(design, key, prefix=prefix)
+    c.title = f"Наволочка {cm} на молнии 2шт сатин"
+    return c
+
+
+def test_key_variant_goes_to_group_with_same_size_in_cm():
+    main = [_pil(1000 + i, "0-0-26", "50х70") for i in range(17)]
+    small = [_pil(2000 + i, "0-0-21", "40х40") for i in range(4)] + [_pil(3000 + i, "0-0-25", "45х45") for i in range(3)]
+    variant = [_pil(4000, "0-0-264", "50х70")]
+    res = run(main + small + variant, tails=True, up=8, down=8)
+    host = next(g for g in res.groups if any(c.key == "0-0-264" for c in g.cards))
+    assert {c.key for c in host.cards} == {"0-0-26", "0-0-264"}            # вариант ключа с тем же размером в см — к 50х70, а не к хвостам
+
+
+def test_cm_of_parses_size_from_title():
+    from gluing.wb.planner import cm_of
+    assert cm_of("Наволочки 70х70 на молнии 2шт") == (70, 70) and cm_of("Наволочка 50 x 70см") == (50, 70)
+    assert cm_of("Наволочка 2шт сатин") is None

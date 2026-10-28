@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 import math
+import re
 from collections import Counter, defaultdict
 from dataclasses import dataclass
 
@@ -58,7 +59,25 @@ def _fallback_rule(bid: str, cat: str, key: str) -> tuple[str, str]:
     return f"key:{key}", f"Ключ {key}"
 
 
-def _key_nums(cards: list[Card]) -> tuple:
+_CM = re.compile(r"(?<!\d)(\d{2,3})\s*[хxX×*]\s*(\d{2,3})(?!\d)")
+
+
+def cm_of(title: str) -> tuple[int, int] | None:
+    """Размер в сантиметрах из названия карточки («Наволочка 50х70 на молнии» -> (50, 70)); меньшая сторона первой."""
+    m = _CM.search(title or "")
+    return tuple(sorted((int(m.group(1)), int(m.group(2))))) if m else None
+
+
+def _cm_set(cards: list[Card]) -> tuple[int, int] | None:
+    """Размер набора карточек в см — самый частый в названиях; None, если ни у одной карточки он не указан."""
+    c = Counter(x for x in (cm_of(k.title) for k in cards) if x)
+    return c.most_common(1)[0][0] if c else None
+
+
+def _key_nums(cards: list[Card], cm: bool = False) -> tuple:
+    """Положение набора на шкале размеров: фактический размер в см (если включён и найден), иначе числа ключа артикула."""
+    if cm and (s := _cm_set(cards)):
+        return s
     return min((tuple(int(n) for n in k.key_nums) or (10**9,)) for k in cards)
 
 
@@ -83,6 +102,10 @@ def _lead(cat: str, br: str, key: str, r: dict) -> str:
     return lead_of(key.split("+")[0])
 
 
+def pools_flat(pools: dict) -> set:
+    return {k for ks in pools.values() for k in ks}
+
+
 def merge_tails(sets: dict[tuple, list[Card]], profile: dict, prev_sizes: frozenset[str] | set[str] = frozenset(),
                 use_solver: bool = False) -> set[str]:
     """Размер — такой же этап деления, как остальные: размер отделяется в свою группу при >= size_split_up карточек, а если вчера
@@ -96,6 +119,7 @@ def merge_tails(sets: dict[tuple, list[Card]], profile: dict, prev_sizes: frozen
     down = r.get("size_merge_down", up)
     skip = set(r.get("no_mix_families", ["rhomb"])) | {"carnival"}
     mix = set(r.get("mix_sizes_bids", []))
+    cm_cats = set(r.get("cm_size_categories", []))          # категории, где размер берётся из названия (в см), а не только из ключа
     separated: set[str] = set()
     use_solver = use_solver and cpsat.available()
     pools: dict[tuple, list[tuple]] = defaultdict(list)
@@ -109,8 +133,21 @@ def merge_tails(sets: dict[tuple, list[Card]], profile: dict, prev_sizes: frozen
             separated.add(size_id(key_))
         else:
             pools[(fam, cat, br, _lead(cat, br, key, r))].append(key_)
+    for key_ in [k for ks in pools.values() for k in ks]:      # малый ключ с тем же размером в см, что у отделённого ключа, — его вариант: идёт в его группы
+        bid, rule, cat, br, key = key_
+        cm = _cm_set(sets[key_]) if cat in cm_cats else None
+        if not cm:
+            continue
+        same = [k for k in sets if k not in pools_flat(pools) and k[2:4] == (cat, br) and k[0].split(":")[0] == bid.split(":")[0]
+                and size_id(k) in separated and _cm_set(sets[k]) == cm]
+        if same:
+            host = max(same, key=lambda k: (len(sets[k]), k))
+            sets[host] = sets[host] + sets.pop(key_)
+            for ks in pools.values():
+                if key_ in ks:
+                    ks.remove(key_)
     for (fam, cat, br, _), keys in pools.items():
-        keys.sort(key=lambda k: _key_nums(sets[k]))
+        keys.sort(key=lambda k: _key_nums(sets[k], cat in cm_cats))
         bins: list[list[tuple]] = [[]]
         size = 0
         for k in keys:
@@ -147,7 +184,7 @@ def merge_tails(sets: dict[tuple, list[Card]], profile: dict, prev_sizes: frozen
                  and _lead(cat, br, k[4], r) == lead
                  and k[0].split(":")[0] not in mix and len(m) >= min_group and len(m) + len(mem) <= work]
         if hosts:
-            host = min(hosts, key=lambda k: (_distance(_key_nums(sets[k]), _key_nums(mem)), k))
+            host = min(hosts, key=lambda k: (_distance(_key_nums(sets[k], cat in cm_cats), _key_nums(mem, cat in cm_cats)), k))
             merged = sets.pop(host) + sets.pop(key_)
             sets[(host[0], host[1], cat, br, host[4] + "+" + key)] = merged
     return separated

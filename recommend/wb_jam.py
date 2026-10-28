@@ -23,7 +23,7 @@ BASE = "https://seller-content.wildberries.ru/ns/"
 HISTORY = BASE + "suppliers-recom/content-card/api/v1/getUploadHistory"
 UPLOAD = BASE + "upload-manager/content-card/api/v1/upload-recoms"
 SET_MASS = BASE + "suppliers-recom/content-card/api/v1/setMassRecommendations"
-BATCH = 4                                   # файлов за один вызов страницы (вызов ждёт ответов WB)
+BATCH = 1                                   # файлов за один вызов страницы (вызов ждёт ответов WB)
 
 
 class JamError(RuntimeError):
@@ -112,10 +112,13 @@ class Chrome:
         self._id += 1
         self.ws.send(json.dumps({"id": self._id, "method": "Runtime.evaluate", "params": {
             "expression": expression, "awaitPromise": True, "returnByValue": True, "timeout": 280000}}))
-        while True:
-            msg = json.loads(self.ws.recv())
-            if msg.get("id") == self._id:
-                break
+        try:
+            while True:
+                msg = json.loads(self.ws.recv())
+                if msg.get("id") == self._id:
+                    break
+        except (websocket.WebSocketException, OSError) as e:
+            raise JamError(f"Chrome на порту {self.port} не ответил вовремя: {e}") from e
         res = msg.get("result", {})
         if "exceptionDetails" in res or "error" in msg:
             raise JamError("ошибка страницы: " + str(res.get("exceptionDetails", msg.get("error")))[:300])

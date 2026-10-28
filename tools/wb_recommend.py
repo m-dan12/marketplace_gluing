@@ -15,6 +15,7 @@ Chrome кабинета (порт cdp_port профиля, см. recommend/wb_ja
 from __future__ import annotations
 
 import argparse
+import builtins
 import csv
 import json
 import shutil
@@ -43,6 +44,10 @@ from recommend.report import TITLES, build_report, summary, write_xlsx
 from recommend.wb import Result, recommend
 from recommend.wb_jam import JamError, upload
 from recommend.wb_send import backup, load_backup, read_current, send
+
+
+def print(*args, **kw) -> None:                                  # noqa: A001  строки лога со временем и сразу на диск (stdout в файле иначе буферизуется)
+    builtins.print(datetime.now().strftime("%H:%M:%S"), *args, flush=True, **kw)
 
 TEMPLATE = Path(__file__).resolve().parent.parent / "recommend" / "wb_template.xlsx"
 
@@ -273,7 +278,13 @@ def main() -> None:
                 print(f"{acc}: записано карточек {len(new)} (до этого с рекомендациями {sum(1 for v in cur.values() if v)}), "
                       f"ошибок WB {len(errs)}: {errs[:3]}")
             if a.jam:
-                problems += finish_jam(acc, prof, res, cards, imt, api_for(acc, env, menv), out, known, eco_designs() if use else frozenset())
+                try:
+                    problems += finish_jam(acc, prof, res, cards, imt, api_for(acc, env, menv), out, known, eco_designs() if use else frozenset())
+                except Exception as e:                           # noqa: BLE001  один кабинет не должен ронять остальные и молчать
+                    msg = f"{acc}: сбой загрузки: {type(e).__name__}: {e}"
+                    REPORT_DIR.joinpath(f"report_{acc}.xlsx").unlink(missing_ok=True)
+                    notice("error", f"Рекомендации WB, {TITLES[acc]}: не заполнены", msg[:3500], f"wb-rec-{acc}-{datetime.now():%Y%m%d-%H%M}")
+                    problems.append(msg)
     if problems:
         print("ПРОБЛЕМЫ:", *problems, sep="\n")
         raise SystemExit(1)
